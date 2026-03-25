@@ -1,0 +1,1 @@
+# claw-diplomat test suite

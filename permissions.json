@@ -1,0 +1,114 @@
+{
+  "skill": "claw-diplomat",
+  "version": "0.1.0",
+  "permissions_declaration": {
+    "filesystem": {
+      "reads": [
+        "SOUL.md",
+        "AGENTS.md",
+        "MEMORY.md",
+        "HEARTBEAT.md",
+        "memory/",
+        "skills/claw-diplomat/diplomat.key",
+        "skills/claw-diplomat/diplomat.pub",
+        "skills/claw-diplomat/my-address.token",
+        "skills/claw-diplomat/peers.json",
+        "skills/claw-diplomat/ledger.json"
+      ],
+      "appends": [
+        "MEMORY.md (## Diplomat Commitments section only)",
+        "HEARTBEAT.md (## Diplomat Deadline Check section, once at install)",
+        "memory/YYYY-MM-DD.md",
+        "skills/claw-diplomat/archive.md"
+      ],
+      "creates_or_overwrites": [
+        "skills/claw-diplomat/diplomat.key (mode 600)",
+        "skills/claw-diplomat/diplomat.pub (mode 644)",
+        "skills/claw-diplomat/my-address.token",
+        "skills/claw-diplomat/peers.json",
+        "skills/claw-diplomat/ledger.json",
+        "skills/claw-diplomat/listener.pid"
+      ],
+      "scope": "workspace-root-only",
+      "deletes": "never",
+      "reads_outside_workspace": false,
+      "writes_outside_workspace": false
+    },
+    "network": {
+      "outbound_endpoints": [
+        {
+          "host": "relay.claw-diplomat.io",
+          "port": 443,
+          "protocols": ["HTTPS", "WSS"],
+          "paths": ["/reserve", "/myip", "/reserve/{token}", "/ws"],
+          "purpose": "Relay slot reservation, IP discovery, and encrypted peer channel"
+        }
+      ],
+      "outbound_configurable": [
+        {
+          "env_var": "DIPLOMAT_RELAY_URL",
+          "default": "wss://relay.claw-diplomat.io:443",
+          "purpose": "Override relay for self-hosted setups"
+        }
+      ],
+      "inbound": [
+        {
+          "protocol": "UDP",
+          "port": "DIPLOMAT_PORT+1 (default 7433)",
+          "purpose": "NAT hole-punch direct channel (optional; not required)"
+        }
+      ],
+      "outbound_internet": true,
+      "connects_to_external_apis": false,
+      "connects_to_cloud_services": false,
+      "connects_to_arbitrary_urls": false,
+      "dns_lookups": "relay.claw-diplomat.io only (unless DIPLOMAT_RELAY_URL overridden)"
+    },
+    "processes": {
+      "spawns_subprocesses": true,
+      "subprocess_details": [
+        {
+          "binary": "python3",
+          "script": "skills/claw-diplomat/listener.py",
+          "purpose": "Inbound peer connection listener",
+          "spawned_by": "diplomat-gateway hook on gateway:startup",
+          "persistent": true,
+          "restarts_on_crash": false
+        }
+      ],
+      "background_daemon": false,
+      "cron_jobs": false,
+      "modifies_system_files": false
+    },
+    "credentials": {
+      "stores_passwords": false,
+      "stores_api_keys": false,
+      "stores_tokens": false,
+      "generates_keypair": true,
+      "keypair_type": "NaCl X25519",
+      "keypair_storage_path": "skills/claw-diplomat/diplomat.key",
+      "keypair_file_mode": "0600",
+      "keypair_leaves_machine": false,
+      "keypair_used_for": "Noise_XX mutual authentication with peers"
+    },
+    "code_execution": {
+      "executes_peer_supplied_code": false,
+      "evaluates_peer_supplied_strings": false,
+      "installs_packages_at_runtime": false,
+      "installs_packages_at_setup": true,
+      "setup_packages": ["PyNaCl>=1.5", "noiseprotocol>=0.3", "websockets>=12.0"],
+      "modifies_other_skills": false,
+      "modifies_hooks_outside_own_directory": false
+    },
+    "data_exfiltration": {
+      "sends_workspace_contents_externally": false,
+      "sends_memory_contents_to_peers": false,
+      "sends_to_relay": "Noise_XX encrypted negotiation messages and commitment hash only; relay cannot decrypt",
+      "telemetry": false,
+      "analytics": false
+    }
+  },
+  "audit_contact": "https://github.com/claw-diplomat/claw-diplomat/security",
+  "source_available": true,
+  "source_url": "https://github.com/claw-diplomat/claw-diplomat"
+}
