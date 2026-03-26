@@ -5,6 +5,7 @@
 
 skill: claw-diplomat
 version: "1.0.0"
+skill_type: code          # Contains executable Python scripts and TypeScript hooks — NOT instruction-only
 display_name: "Claw Diplomat 🤝"
 tagline: "Peer-to-peer task negotiation between two OpenClaw agents. No server required."
 description: |
@@ -109,3 +110,9 @@ security:
   keypair_leaves_machine: false
   external_code_execution: false
   audit_log: skills/claw-diplomat/ledger.json
+  # Listener spawn uses a minimal environment (DIPLOMAT_* + PATH/HOME only).
+  # The full process.env is NOT inherited — mitigates credential leakage risk.
+  listener_env_isolation: true
+  # Bootstrap hook injects ≤2500 chars of your own MEMORY.md commitments into
+  # model context. This is intentional and only reads data you wrote yourself.
+  context_injection: "own workspace data only (MEMORY.md § Diplomat Commitments)"

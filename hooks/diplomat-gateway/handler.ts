@@ -48,8 +48,28 @@ export async function handler(
     }
   }
 
+  // Build a minimal environment — DIPLOMAT_* vars + bare essentials for python3.
+  // Do NOT inherit the full process.env: that would expose any secrets (API keys,
+  // cloud credentials, SSH agent sockets) present in the gateway's environment.
+  // SECURITY: only DIPLOMAT_*, PATH, HOME, PYTHONPATH, VIRTUAL_ENV are forwarded.
+  const minimalEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (
+      k.startsWith('DIPLOMAT_') ||
+      k === 'PATH' ||
+      k === 'HOME' ||
+      k === 'PYTHONPATH' ||
+      k === 'VIRTUAL_ENV' ||
+      k === 'PYTHONHOME'
+    ) {
+      if (v !== undefined) minimalEnv[k] = v;
+    }
+  }
+  // Always ensure workspace is set so listener.py can find its files
+  minimalEnv['DIPLOMAT_WORKSPACE'] = workspaceRoot;
+
   const child = spawn('python3', [listenerPath], {
-    env:      { ...process.env },
+    env:      minimalEnv,
     detached: true,
     stdio:    'ignore',
   });
