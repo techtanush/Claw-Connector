@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# clawhub.yaml — ClawHub Marketplace Listing
+# claw-diplomat v1.0.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+skill: claw-diplomat
+version: "1.0.0"
+display_name: "Claw Diplomat 🤝"
+tagline: "Peer-to-peer task negotiation between two OpenClaw agents. No server required."
+description: |
+  claw-diplomat lets two OpenClaw agents — yours and a peer's — agree on tasks,
+  lock in binding commitments, and track follow-through. Every deal is
+  end-to-end encrypted with Noise_XX (AES-256-GCM) before it touches the relay.
+  No central broker. No shared database. Your private key never leaves your machine.
+
+author:
+  name: claw-diplomat-team
+  url: https://github.com/claw-diplomat/claw-diplomat
+
+license: MIT-0
+source_url: https://github.com/claw-diplomat/claw-diplomat
+homepage: https://clawhub.io/skills/claw-diplomat
+support_url: https://github.com/claw-diplomat/claw-diplomat/issues
+changelog_url: https://github.com/claw-diplomat/claw-diplomat/releases
+
+# ─── Pricing ──────────────────────────────────────────────────────────────────
+pricing:
+  model: free
+  price: 0
+
+# ─── Discoverability ──────────────────────────────────────────────────────────
+category: collaboration
+subcategory: multi-agent
+tags:
+  - negotiation
+  - peer-to-peer
+  - collaboration
+  - task-management
+  - commitment-tracking
+  - local-first
+  - relay
+  - encrypted
+  - multi-agent
+  - productivity
+
+# ─── Compatibility ────────────────────────────────────────────────────────────
+compatibility:
+  openclaw_min_version: "2026.2.23"
+  platforms:
+    - macos
+    - linux
+    - windows    # via WSL2
+
+# ─── Runtime Requirements ─────────────────────────────────────────────────────
+requirements:
+  runtime: python>=3.10
+  python_packages:
+    - PyNaCl>=1.5
+    - noiseprotocol>=0.3
+    - websockets>=12.0
+
+# ─── Permissions Requested ────────────────────────────────────────────────────
+permissions:
+  workspace_reads:
+    - SOUL.md
+    - AGENTS.md
+    - MEMORY.md
+    - HEARTBEAT.md
+    - memory/
+  workspace_writes:
+    - MEMORY.md
+    - HEARTBEAT.md
+    - skills/claw-diplomat/
+    - memory/YYYY-MM-DD.md
+  network:
+    - host: claw-diplomat-relay-production.up.railway.app
+      port: 443
+      protocol: WSS+HTTPS
+      purpose: Relay slot reservation and encrypted peer messaging
+  spawns_processes:
+    - name: listener.py
+      runtime: python3
+      purpose: Inbound relay listener
+
+# ─── Install ──────────────────────────────────────────────────────────────────
+install:
+  skill_dir: skills/claw-diplomat/
+  hooks_dir: hooks/
+  post_install_command: "pip install PyNaCl noiseprotocol websockets"
+  post_install_message: |
+    👋 claw-diplomat is installed!
+
+    Generate your Diplomat Address to start negotiating:
+      /claw-diplomat generate-address
+
+# ─── Listing Assets ───────────────────────────────────────────────────────────
+assets:
+  icon: .clawhub/icon.png    # 512×512 PNG (optional)
+  screenshots: []            # paths to screenshots
+
+# ─── Security Declarations ────────────────────────────────────────────────────
+security:
+  encryption: "Noise_XX (AES-256-GCM) end-to-end"
+  data_exfiltration: none
+  executes_peer_content: never
+  stores_credentials: false
+  stores_api_keys: false
+  generates_keypair: true
+  keypair_leaves_machine: false
+  external_code_execution: false
+  audit_log: skills/claw-diplomat/ledger.json

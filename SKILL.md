@@ -1,15 +1,15 @@
 ---
 # ─────────────────────────────────────────────
-# claw-diplomat — ClawHub Skill Manifest v0.1.0
+# claw-diplomat — ClawHub Skill Manifest v1.0.0
 # ─────────────────────────────────────────────
 
 name: claw-diplomat
-version: 0.1.0
+version: 1.0.0
 display_name: "Claw Diplomat 🤝"
 emoji: 🤝
 tagline: "Peer-to-peer task negotiation between two OpenClaw agents. No server required."
 author: claw-diplomat-team
-license: MIT
+license: MIT-0
 homepage: https://clawhub.io/skills/claw-diplomat
 support: https://github.com/claw-diplomat/claw-diplomat/issues
 source_url: https://github.com/claw-diplomat/claw-diplomat
@@ -90,6 +90,7 @@ workspace_access:
     - "skills/claw-diplomat/my-address.token"   # overwritten on /claw-diplomat generate-address
     - "skills/claw-diplomat/peers.json"         # updated on connect and reconnect
     - "skills/claw-diplomat/ledger.json"        # updated on every state transition
+    - "skills/claw-diplomat/pending_approvals.json"  # inbound connection requests awaiting approval
     - "skills/claw-diplomat/listener.pid"       # written by gateway hook
   never_touches:
     - SOUL.md
@@ -102,9 +103,9 @@ network:
     - host: claw-diplomat-relay-production.up.railway.app
       port: 443
       paths:
-        - /reserve          # POST: reserve relay slot for Diplomat Address
-        - /myip             # GET: discover public IP for nat_hint
-        - /reserve/{token}  # DELETE: revoke a relay token
+        - /reserve                  # GET: reserve relay slot for Diplomat Address
+        - /myip                     # GET: discover public IP for nat_hint
+        - /reserve/{token}/revoke   # GET: revoke a relay token
       protocol: HTTPS
       purpose: "Relay slot reservation and IP discovery"
       encrypted: true
@@ -219,7 +220,7 @@ install:
 # ─── Package Integrity ────────────────────────
 # SHA-256 computed over all skill source files after final build.
 # Run: find . -type f | sort | xargs sha256sum | sha256sum
-sha256: "eedf89f5f82038d404588c9768bc05edf4d455c08be2ce72b01c9dfd49d17296"
+sha256: "a11b6fef8fb790bb71d16206fa75c419078b4c2927b84fd88e71462ef107e4f9"
 ---
 
 # claw-diplomat — Agent Operating Manual
@@ -279,6 +280,7 @@ You execute negotiation logic through two Python scripts located at `skills/claw
 | `/claw-diplomat status` | Show pending check-ins and overdue commitments |
 | `/claw-diplomat key` | Print your public key |
 | `/claw-diplomat revoke` | Revoke your current Diplomat Address token |
+| `/claw-diplomat handoff <peer_alias>` | Hand off completed work and context to a peer |
 | `/claw-diplomat retry-commit <id>` | Retry a failed MEMORY.md write |
 | `/claw-diplomat help security` | Show security information |
 
@@ -740,4 +742,4 @@ After install, verify:
 
 ---
 
-*claw-diplomat v0.1.0 — Your agent. Their agent. One deal.*
+*claw-diplomat v1.0.0 — Your agent. Their agent. One deal.*

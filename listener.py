@@ -43,10 +43,16 @@ except ImportError as _e:
 
 # ─── Internal ─────────────────────────────────────────────────────────────────
 # All core logic is imported from negotiate.py to avoid duplication (DRY).
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+except NameError:
+    # __file__ is not defined when this module is loaded via exec_module in tests
+    pass
 from negotiate import (
     MAX_CONNECTIONS_PER_IP_PER_MIN,
     MAX_PENDING_SESSIONS,
+    MAX_TASK_TEXT,
+    MAX_PROPOSAL_TEXT,
     MsgType,
     NoiseKeypair,
     NOISE_PATTERN,
@@ -80,6 +86,7 @@ from negotiate import (
     load_public_key_hex,
     read_agent_alias,
     recv_noise_message,
+    sanitize_string,
     send_noise_message,
     upsert_session,
     validate_propose_payload,
@@ -105,7 +112,7 @@ class _RateLimiter:
     Simple in-memory rate limiter: max N connections per IP per rolling minute.
     SECURITY T4.
     """
-    def __init__(self, max_per_minute: int) -> None:
+    def __init__(self, max_per_minute: int = MAX_CONNECTIONS_PER_IP_PER_MIN) -> None:
         self._max = max_per_minute
         self._counts: dict[str, list[float]] = defaultdict(list)
 
@@ -180,10 +187,10 @@ async def handle_inbound_connection(
         return
 
     # Pending session count check — SECURITY T4
-    sessions = load_ledger(workspace_root)
+    _ledger = load_ledger(workspace_root)
     open_count = sum(
-        1 for s in sessions
-        if s.state not in (
+        1 for s in _ledger.get("sessions", [])
+        if s.get("state") not in (
             SessionState.COMMITTED.value, SessionState.DONE.value,
             SessionState.OVERDUE.value, SessionState.REJECTED.value,
             SessionState.CANCELLED.value,
@@ -258,15 +265,63 @@ async def handle_inbound_connection(
     # Peer trust check — SECURITY T4
     trusted = is_peer_trusted(workspace_root, peer_pubkey_hex)
 
-    # Receive the PROPOSE message
+    # Receive the incoming message — could be PROPOSE (negotiation) or HANDOFF (context passing)
     try:
-        proposal_msg = await recv_noise_message(noise_conn, ws, timeout=60.0)
+        incoming_msg = await recv_noise_message(noise_conn, ws, timeout=60.0)
     except (asyncio.TimeoutError, ValueError, websockets.exceptions.ConnectionClosed) as e:
-        LOG.info("No proposal received from %s: %s", peer_ip, e)
+        LOG.info("No message received from %s: %s", peer_ip, e)
         return
 
-    if proposal_msg.get("msg_type") != MsgType.PROPOSE.value:
-        LOG.info("Expected PROPOSE from %s, got %s", peer_ip, proposal_msg.get("msg_type"))
+    msg_type_recv = incoming_msg.get("msg_type")
+
+    # ── HANDOFF: peer is passing completed work + context ──────────────────────
+    if msg_type_recv == MsgType.HANDOFF.value:
+        payload_h     = incoming_msg.get("payload", {})
+        from_alias_h  = sanitize_string(str(payload_h.get("from_alias", peer_alias_raw)))[:64]
+        part_done_h   = sanitize_string(str(payload_h.get("part_done",      "")))[:MAX_TASK_TEXT]
+        part_rem_h    = sanitize_string(str(payload_h.get("part_remaining", "")))[:MAX_TASK_TEXT]
+        context_h     = sanitize_string(str(payload_h.get("context",        "")))[:MAX_PROPOSAL_TEXT]
+        short_id_h    = _short_id(session_id)
+
+        # Persist handoff to ledger (HANDOFF_RECEIVED state)
+        handoff_record = SessionRecord(
+            session_id=session_id,
+            peer_alias=from_alias_h,
+            peer_pubkey=peer_pubkey_hex or "",
+            initiated_by="peer",
+            state=SessionState.HANDOFF_RECEIVED.value,
+            terms_version=0,
+            final_terms={
+                "type":           "HANDOFF",
+                "from_alias":     from_alias_h,
+                "part_done":      part_done_h,
+                "part_remaining": part_rem_h,
+                "context":        context_h,
+                "received_at":    _utc_now_iso(),
+            },
+            memory_hash=None,
+            peer_memory_hash=None,
+            seen_nonces=[incoming_msg.get("nonce", "")],
+            events=[{"type": "HANDOFF_RECEIVED", "at": _utc_now_iso(), "by": from_alias_h}],
+            created_at=_utc_now_iso(),
+        )
+        upsert_session(workspace_root, handoff_record)
+        append_to_daily_log(
+            workspace_root,
+            f"- {_utc_now_iso()} — HANDOFF from {from_alias_h} [{short_id_h}]: "
+            f"done={part_done_h[:60]}, remaining={part_rem_h[:60]}\n",
+        )
+        LOG.info(
+            "Task handoff received from %s (session %s) — written to ledger",
+            from_alias_h, short_id_h,
+        )
+        return
+
+    # ── PROPOSE: peer wants to negotiate a task deal ───────────────────────────
+    proposal_msg = incoming_msg  # alias for clarity
+
+    if msg_type_recv != MsgType.PROPOSE.value:
+        LOG.info("Expected PROPOSE or HANDOFF from %s, got %s", peer_ip, msg_type_recv)
         return
 
     # Validate payload — SECURITY T1 (sanitize ALL incoming fields)

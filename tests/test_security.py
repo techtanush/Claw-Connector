@@ -149,15 +149,14 @@ class TestRateLimiter(unittest.TestCase):
 
     def test_rate_limiter_allows_within_limit(self) -> None:
         """Up to 5 connections/IP/min are allowed."""
-        # Import from listener module
-        import importlib.util
+        import importlib.util, types
         spec = importlib.util.spec_from_file_location(
             "listener",
             Path(__file__).parent.parent / "listener.py",
         )
-        listener = importlib.util.load_from_spec(spec) if spec else None
-        if listener is None:
+        if spec is None:
             self.skipTest("listener.py not importable in test context")
+        listener = types.ModuleType("listener")
         spec.loader.exec_module(listener)  # type: ignore[union-attr]
         rl = listener._RateLimiter()
         for _ in range(5):

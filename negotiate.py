@@ -99,6 +99,9 @@ MAX_NONCE_AGE_SECONDS: int = 300   # 5 minutes
 # Rate limiting (inbound connections) — enforced in listener.py
 MAX_CONNECTIONS_PER_IP_PER_MIN: int = 5
 
+# MEMORY.md entry constraints
+MAX_MEMORY_ENTRY_CHARS: int = 500    # max characters per compact commitment entry
+
 # Unicode direction-override code points to strip (SECURITY T1)
 _DIRECTION_OVERRIDES: frozenset[int] = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
 
@@ -115,22 +118,24 @@ class MsgType(str, Enum):
     COMMIT_ACK  = "COMMIT_ACK"
     CHECKIN     = "CHECKIN"
     CONNECT_REQ = "CONNECT_REQ"
+    HANDOFF     = "HANDOFF"     # Task handoff: Alice completes Part A, passes context to Bob
 
 class SessionState(str, Enum):
-    IDLE             = "IDLE"
-    PENDING_SEND     = "PENDING_SEND"
-    PROPOSED         = "PROPOSED"
-    COUNTERED        = "COUNTERED"
-    ACCEPTED         = "ACCEPTED"
-    COMMIT_PENDING   = "COMMIT_PENDING"
-    COMMITTED        = "COMMITTED"
-    CHECK_IN_DUE     = "CHECK_IN_DUE"
-    DONE             = "DONE"
-    OVERDUE          = "OVERDUE"
-    PARTIAL          = "PARTIAL"
-    REJECTED         = "REJECTED"
-    CANCELLED        = "CANCELLED"
-    INBOUND_PENDING  = "INBOUND_PENDING"
+    IDLE              = "IDLE"
+    PENDING_SEND      = "PENDING_SEND"
+    PROPOSED          = "PROPOSED"
+    COUNTERED         = "COUNTERED"
+    ACCEPTED          = "ACCEPTED"
+    COMMIT_PENDING    = "COMMIT_PENDING"
+    COMMITTED         = "COMMITTED"
+    CHECK_IN_DUE      = "CHECK_IN_DUE"
+    DONE              = "DONE"
+    OVERDUE           = "OVERDUE"
+    PARTIAL           = "PARTIAL"
+    REJECTED          = "REJECTED"
+    CANCELLED         = "CANCELLED"
+    INBOUND_PENDING   = "INBOUND_PENDING"
+    HANDOFF_RECEIVED  = "HANDOFF_RECEIVED"  # inbound task handoff context received
 
 # ─── Data Classes ─────────────────────────────────────────────────────────────
 @dataclass
@@ -271,6 +276,33 @@ def sanitize_string(text: str) -> str:
     result = strip_control_characters(result)
     return result
 
+def sanitize_peer_string(text: str, max_length: int) -> str:
+    """Sanitize a peer-supplied string and truncate to max_length. SECURITY T1."""
+    result = sanitize_string(text)
+    if len(result) > max_length:
+        result = result[:max_length]
+    return result
+
+def validate_message_timestamp(iso_str: str) -> bool:
+    """Return True if ISO timestamp is within MAX_NONCE_AGE_SECONDS of now. SECURITY T2."""
+    try:
+        ts = validate_iso8601(iso_str)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        age = abs((now - ts).total_seconds())
+        return age <= MAX_NONCE_AGE_SECONDS
+    except ValueError:
+        return False
+
+def is_replay(nonce: str, seen_nonces: set) -> bool:
+    """
+    Return True if nonce was already seen (replay attack). SECURITY T2.
+    Adds nonce to seen_nonces on first call (registers it as seen).
+    """
+    if nonce in seen_nonces:
+        return True
+    seen_nonces.add(nonce)
+    return False
+
 def sanitize_task_list(tasks: Any) -> list[str]:
     """Validate and sanitize a task list from an untrusted source."""
     if not isinstance(tasks, list):
@@ -396,18 +428,18 @@ def truncate_to_budget(text: str, max_chars: int) -> str:
 def build_memory_entry(
     session_id_short: str,
     peer_alias: str,
-    my_task: str,
-    peer_task: str,
+    my_tasks: str,
+    peer_tasks: str,
     deadline_utc: str,
-    status: str,
+    state: str,
 ) -> str:
-    """Build a compact MEMORY.md commitment entry within 500-char budget."""
+    """Build a compact MEMORY.md commitment entry within MAX_MEMORY_ENTRY_CHARS budget."""
     entry = (
-        f"- **[{status}]** Peer: {peer_alias} | "
-        f"My: {my_task} | Their: {peer_task} | "
+        f"- **[{state}]** Peer: {peer_alias} | "
+        f"My: {my_tasks} | Their: {peer_tasks} | "
         f"Due: {deadline_utc} | ID: `{session_id_short}`"
     )
-    return truncate_to_budget(entry, 500)
+    return truncate_to_budget(entry, MAX_MEMORY_ENTRY_CHARS)
 
 def build_extended_entry(
     session_id_short: str,
@@ -435,11 +467,11 @@ def build_extended_entry(
     )
 
 # ─── Crypto: Key Management ────────────────────────────────────────────────────
-def generate_keypair(workspace_root: str) -> None:
+def generate_keypair(workspace_root: str) -> tuple[bytes, bytes]:
     """
     Generate a NaCl X25519 keypair and write it to the skill directory.
     Sets strict file permissions: diplomat.key → 600, diplomat.pub → 644.
-    Does NOT overwrite an existing key. SECURITY T3.
+    Does NOT overwrite an existing key. Returns (private_key_bytes, public_key_bytes). SECURITY T3.
     """
     skill_dir = get_skill_dir(workspace_root)
     os.makedirs(skill_dir, exist_ok=True)
@@ -449,7 +481,9 @@ def generate_keypair(workspace_root: str) -> None:
 
     if os.path.exists(key_path):
         LOG.info("Keypair already exists — skipping generation")
-        return
+        priv_bytes = load_private_key_bytes(workspace_root)
+        pub_bytes = bytes(nacl.public.PrivateKey(priv_bytes).public_key)
+        return priv_bytes, pub_bytes
 
     # Generate using PyNaCl (Curve25519)
     private_key = nacl.public.PrivateKey.generate()
@@ -468,6 +502,7 @@ def generate_keypair(workspace_root: str) -> None:
     os.chmod(pub_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)  # 644
 
     LOG.info("Keypair generated: %s (mode 600), %s (mode 644)", key_path, pub_path)
+    return bytes(private_key), bytes(private_key.public_key)
 
 def load_private_key_bytes(workspace_root: str) -> bytes:
     """
@@ -548,35 +583,106 @@ async def _noise_handshake_responder(
 ) -> None:
     """
     Perform Noise_XX handshake as responder (3 messages: recv, send, recv).
+    Captures remote static key before noiseprotocol deletes handshake_state,
+    storing it on conn._remote_static_pubkey_bytes for post-handshake verification.
     """
+    # Patch handshake_done to capture rs BEFORE it is deleted (SECURITY T2)
+    _orig_done = conn.noise_protocol.handshake_done
+    def _capturing_done() -> None:  # type: ignore[override]
+        hs = getattr(conn.noise_protocol, "handshake_state", None)
+        if hs is not None:
+            rs = getattr(hs, "rs", None)
+            if rs is not None:
+                try:
+                    # KeyPair25519 from the default backend: use .public_bytes property
+                    if hasattr(rs, "public_bytes"):
+                        conn._remote_static_pubkey_bytes = bytes(rs.public_bytes)
+                    elif hasattr(rs, "public"):
+                        conn._remote_static_pubkey_bytes = bytes(rs.public)
+                    elif isinstance(rs, bytes):
+                        conn._remote_static_pubkey_bytes = rs
+                except Exception:
+                    pass
+        _orig_done()
+    conn.noise_protocol.handshake_done = _capturing_done  # type: ignore[method-assign]
+
     # Message 1: initiator → responder
     msg1 = await asyncio.wait_for(ws.recv(), timeout=30.0)
     conn.read_message(msg1)
     # Message 2: responder → initiator
     msg2 = conn.write_message()
     await ws.send(msg2)
-    # Message 3: initiator → responder
+    # Message 3: initiator → responder (contains initiator's static key)
     msg3 = await asyncio.wait_for(ws.recv(), timeout=30.0)
-    conn.read_message(msg3)
+    conn.read_message(msg3)  # triggers _capturing_done() → captures rs
 
 def _get_remote_static_pubkey(conn: NoiseConnection) -> Optional[bytes]:
     """
     Extract remote static public key bytes from a completed Noise_XX handshake.
-    Handles different noiseprotocol API versions gracefully.
+
+    The noiseprotocol library deletes handshake_state after handshake_done(), so we
+    capture rs during _noise_handshake_responder() and store it on
+    conn._remote_static_pubkey_bytes before deletion.
+
+    Falls back to live handshake_state inspection for compatibility with other
+    noiseprotocol versions that may not delete the state.
     """
+    # Primary path: captured by _noise_handshake_responder monkey-patch
+    captured = getattr(conn, "_remote_static_pubkey_bytes", None)
+    if captured is not None:
+        return bytes(captured)
+
+    # Fallback: live handshake_state (some library versions keep it)
     try:
-        rs = conn.noise_protocol.handshake_state.rs
+        hs = getattr(getattr(conn, "noise_protocol", None), "handshake_state", None)
+        if hs is None:
+            return None
+        rs = getattr(hs, "rs", None)
         if rs is None:
             return None
+        if isinstance(rs, bytes):
+            return rs
+        if hasattr(rs, "public_bytes"):
+            try:
+                from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+                return rs.public_bytes(Encoding.Raw, PublicFormat.Raw)
+            except Exception:
+                pass
+        if hasattr(rs, "public"):
+            pk = rs.public
+            if isinstance(pk, bytes):
+                return pk
         if hasattr(rs, "public_bytes_raw"):
             return rs.public_bytes_raw()
-        if hasattr(rs, "public_key"):
-            pk = rs.public_key
-            if hasattr(pk, "public_bytes_raw"):
-                return pk.public_bytes_raw()
         return None
     except AttributeError:
         return None
+
+def build_noise_initiator(private_key_bytes: bytes, peer_pub_bytes: Optional[bytes] = None) -> NoiseConnection:
+    """
+    Public wrapper for _build_noise_initiator.
+    peer_pub_bytes is accepted for API consistency but verified post-handshake
+    via verify_remote_static_key (Noise_XX authenticates static keys during handshake).
+    """
+    return _build_noise_initiator(private_key_bytes)
+
+def build_noise_responder(private_key_bytes: bytes) -> NoiseConnection:
+    """Public wrapper for _build_noise_responder."""
+    return _build_noise_responder(private_key_bytes)
+
+def verify_remote_static_key(conn: NoiseConnection, expected_pub_bytes: bytes) -> None:
+    """
+    Verify the remote static key from a completed Noise_XX handshake matches expected_pub_bytes.
+    Raises SecurityError on mismatch. SECURITY T2.
+    """
+    remote_bytes = _get_remote_static_pubkey(conn)
+    if remote_bytes is None:
+        return  # Cannot verify — allow gracefully (noiseprotocol API limitation)
+    if remote_bytes != expected_pub_bytes:
+        raise SecurityError(
+            "Remote static key mismatch — connection aborted. "
+            "Ask the peer to share a fresh Diplomat Address."
+        )
 
 async def send_noise_message(
     noise_conn: NoiseConnection,
@@ -743,18 +849,34 @@ def upsert_peer(workspace_root: str, peer: PeerInfo) -> None:
     save_peers(workspace_root, peers)
 
 # ─── File I/O: Ledger ─────────────────────────────────────────────────────────
-def load_ledger(workspace_root: str) -> list[SessionRecord]:
-    """Load ledger.json. Handles corruption gracefully. DATA_FLOWS F8."""
+# States permitted when updating a COMMITTED session (Security T5)
+_COMMITTED_ALLOWED_STATES: frozenset[str] = frozenset({
+    SessionState.COMMITTED.value,
+    SessionState.DONE.value,
+    SessionState.OVERDUE.value,
+    SessionState.PARTIAL.value,
+    SessionState.CANCELLED.value,
+})
+
+def load_ledger(workspace_root: str) -> dict[str, Any]:
+    """
+    Load ledger.json. Returns raw dict {"sessions": [...]}.
+    Handles corruption gracefully — returns {"sessions": []} on error.
+    DATA_FLOWS F8.
+    """
     path = get_ledger_path(workspace_root)
     if not os.path.exists(path):
-        return []
+        return {"sessions": []}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
         # Attempt recovery — back up corrupt file, start fresh
         bak = path + ".bak"
-        shutil.copy2(path, bak)
+        try:
+            shutil.copy2(path, bak)
+        except OSError:
+            pass
         LOG.error(
             "ledger.json is corrupted. Backed up to %s. Starting fresh. Error: %s",
             bak, e,
@@ -764,7 +886,24 @@ def load_ledger(workspace_root: str) -> list[SessionRecord]:
             "Committed deals in your memory are unaffected.",
             file=sys.stderr,
         )
-        return []
+        return {"sessions": []}
+    if not isinstance(data, dict):
+        return {"sessions": []}
+    if "sessions" not in data:
+        data["sessions"] = []
+    return data
+
+def save_ledger(workspace_root: str, ledger: dict[str, Any]) -> None:
+    """Atomically write ledger.json. Accepts raw dict {"sessions": [...]}."""
+    path = get_ledger_path(workspace_root)
+    _atomic_json_write(path, ledger)
+
+def _load_sessions(workspace_root: str) -> list[SessionRecord]:
+    """
+    Internal helper: load ledger and deserialize to list[SessionRecord].
+    Skips malformed entries with a warning.
+    """
+    data = load_ledger(workspace_root)
     sessions: list[SessionRecord] = []
     for s in data.get("sessions", []):
         try:
@@ -776,46 +915,62 @@ def load_ledger(workspace_root: str) -> list[SessionRecord]:
             LOG.warning("Skipping malformed session entry: %s", e)
     return sessions
 
-def save_ledger(workspace_root: str, sessions: list[SessionRecord]) -> None:
-    """Atomically write ledger.json."""
-    path = get_ledger_path(workspace_root)
-    data = {"sessions": [asdict(s) for s in sessions]}
-    _atomic_json_write(path, data)
+def _save_sessions(workspace_root: str, sessions: list[SessionRecord]) -> None:
+    """Internal helper: serialize list[SessionRecord] and write ledger.json."""
+    ledger: dict[str, Any] = {"sessions": [asdict(s) for s in sessions]}
+    save_ledger(workspace_root, ledger)
 
 def get_session(workspace_root: str, session_id: str) -> Optional[SessionRecord]:
-    for s in load_ledger(workspace_root):
+    for s in _load_sessions(workspace_root):
         if s.session_id == session_id:
             return s
     return None
 
 def get_session_by_short_id(workspace_root: str, short_id: str) -> Optional[SessionRecord]:
-    for s in load_ledger(workspace_root):
+    for s in _load_sessions(workspace_root):
         if s.session_id.startswith(short_id) or s.session_id[:4] == short_id:
             return s
     return None
 
 def upsert_session(workspace_root: str, session: SessionRecord) -> None:
-    """Add or update a session record by session_id."""
-    sessions = load_ledger(workspace_root)
+    """Add or update a session record by session_id. SECURITY T5: COMMITTED sessions are immutable."""
+    sessions = _load_sessions(workspace_root)
     for i, s in enumerate(sessions):
         if s.session_id == session.session_id:
-            # SECURITY T5: do not allow overwriting COMMITTED session final_terms
             if s.state == SessionState.COMMITTED.value:
-                existing = s.final_terms
-                incoming = session.final_terms
-                if existing != incoming:
+                # SECURITY T5a: final_terms cannot change
+                if s.final_terms != session.final_terms:
                     LOG.error(
                         "SECURITY: Attempt to mutate COMMITTED session %s final_terms. Blocked.",
                         session.session_id[:8],
                     )
                     raise SecurityError(
-                        f"COMMITTED session {session.session_id[:8]} final_terms cannot be changed."
+                        f"COMMITTED session {session.session_id[:8]}: final_terms cannot be changed."
+                    )
+                # SECURITY T5b: memory_hash cannot change
+                if s.memory_hash != session.memory_hash:
+                    LOG.error(
+                        "SECURITY: Attempt to change memory_hash of COMMITTED session %s. Blocked.",
+                        session.session_id[:8],
+                    )
+                    raise SecurityError(
+                        f"COMMITTED session {session.session_id[:8]}: memory_hash cannot be changed."
+                    )
+                # SECURITY T5c: state cannot revert to non-terminal state
+                if session.state not in _COMMITTED_ALLOWED_STATES:
+                    LOG.error(
+                        "SECURITY: Attempt to revert COMMITTED session %s to state %s. Blocked.",
+                        session.session_id[:8], session.state,
+                    )
+                    raise SecurityError(
+                        f"COMMITTED session {session.session_id[:8]}: "
+                        f"cannot revert state to {session.state!r}."
                     )
             sessions[i] = session
-            save_ledger(workspace_root, sessions)
+            _save_sessions(workspace_root, sessions)
             return
     sessions.append(session)
-    save_ledger(workspace_root, sessions)
+    _save_sessions(workspace_root, sessions)
 
 def add_session_event(
     workspace_root: str,
@@ -868,12 +1023,17 @@ def _atomic_json_write(path: str, data: Any) -> None:
 def append_commitment_to_memory(workspace_root: str, entry: str) -> str:
     """
     Append a compact commitment entry to MEMORY.md ## Diplomat Commitments section.
-    Enforces 500-char budget and 20-entry limit. Atomic write. ARCHITECTURE §8.
+    Enforces MAX_MEMORY_ENTRY_CHARS budget and 20-entry limit. Atomic write. ARCHITECTURE §8.
     Returns SHA-256 hash of the written entry.
+    Raises ValueError if entry exceeds MAX_MEMORY_ENTRY_CHARS.
     Raises RuntimeError on write failure. DATA_FLOWS F7.
     """
+    if len(entry) > MAX_MEMORY_ENTRY_CHARS:
+        raise ValueError(
+            f"Memory entry exceeds {MAX_MEMORY_ENTRY_CHARS} chars (got {len(entry)}). "
+            "Use build_memory_entry() to build a correctly-sized entry."
+        )
     memory_path = get_memory_path(workspace_root)
-    entry = truncate_to_budget(entry, 500)
 
     try:
         content = open(memory_path, "r", encoding="utf-8").read() if os.path.exists(memory_path) else ""
@@ -928,17 +1088,18 @@ def update_memory_entry_status(
     )
     new_content, count = pattern.subn(r"\g<1>" + new_status + r"\g<2>", content)
     if count == 0:
-        raise KeyError(f"Commitment ID {session_id_short!r} not found in MEMORY.md")
+        raise ValueError(f"Commitment ID {session_id_short!r} not found in MEMORY.md")
     _atomic_write(memory_path, new_content)
 
 def _count_commitment_entries(content: str) -> int:
+    """Count ACTIVE entries in ## Diplomat Commitments section (DONE/OVERDUE/PARTIAL do not count)."""
     section_header = "## Diplomat Commitments\n"
     if section_header not in content:
         return 0
     start = content.index(section_header) + len(section_header)
     end_idx = content.find("\n## ", start)
     section = content[start:end_idx] if end_idx != -1 else content[start:]
-    return sum(1 for line in section.splitlines() if "- **[" in line)
+    return sum(1 for line in section.splitlines() if "- **[ACTIVE]**" in line)
 
 def archive_oldest_done_entry(workspace_root: str) -> bool:
     """
@@ -1363,7 +1524,7 @@ def cmd_key(workspace_root: str) -> None:
 
 def cmd_list(workspace_root: str) -> None:
     """Show all active/recent sessions. /claw-diplomat list"""
-    sessions = load_ledger(workspace_root)
+    sessions = _load_sessions(workspace_root)
     if not sessions:
         print("No negotiations on record.")
         return
@@ -1389,7 +1550,7 @@ def cmd_peers(workspace_root: str) -> None:
 
 def cmd_status(workspace_root: str) -> None:
     """Show pending check-ins and overdue. /claw-diplomat status"""
-    sessions = load_ledger(workspace_root)
+    sessions = _load_sessions(workspace_root)
     now = datetime.datetime.now(datetime.timezone.utc)
 
     active = [s for s in sessions if s.state == SessionState.COMMITTED.value and s.final_terms]
@@ -2367,6 +2528,168 @@ def _parse_time_part(text: str) -> tuple[int, int]:
         hour = 0
     return hour, minute
 
+# ─── Task Handoff Command ─────────────────────────────────────────────────────
+async def cmd_handoff(workspace_root: str, peer_alias: str) -> None:
+    """
+    Send a task handoff to a peer, packaging completed work + remaining context.
+    /claw-diplomat handoff <peer_alias>
+    Interactive: gathers handoff details from stdin.
+    SECURITY T1: all user-provided text is sanitized before send.
+    """
+    peer = lookup_peer_by_alias(workspace_root, peer_alias)
+    if peer is None:
+        print(
+            f"I don't have a connection to {peer_alias}. "
+            f"Run /claw-diplomat connect <address> first."
+        )
+        return
+
+    print(f"What did you complete? (Part A — what's done)")
+    part_done = input("> ").strip()
+    print(f"What still needs to be done by {peer_alias}? (Part B — remaining)")
+    part_remaining = input("> ").strip()
+    print(f"Any context {peer_alias} needs to continue? (notes, links, credential-free details)")
+    context = input("> ").strip()
+
+    # Sanitize all user-provided text (SECURITY T1)
+    part_done      = sanitize_string(part_done)[:MAX_TASK_TEXT]
+    part_remaining = sanitize_string(part_remaining)[:MAX_TASK_TEXT]
+    context        = sanitize_string(context)[:MAX_PROPOSAL_TEXT]
+
+    ctx_preview = context[:80] + ("…" if len(context) > 80 else "")
+    print(
+        f"\nHere's what you're handing off to {peer_alias}:\n\n"
+        f"  Done by you:       {part_done}\n"
+        f"  Remaining for them: {part_remaining}\n"
+        f"  Context:           {ctx_preview}\n\n"
+        f"Send this handoff? (yes / no)"
+    )
+    confirm = input("> ").strip().lower()
+    if confirm not in ("yes", "y"):
+        print("Handoff cancelled.")
+        return
+
+    # Load keys and relay token
+    if not os.path.exists(get_key_path(workspace_root)):
+        generate_keypair(workspace_root)
+    private_key_bytes = load_private_key_bytes(workspace_root)
+    our_pubkey_hex    = load_public_key_hex(workspace_root)
+    our_alias         = read_agent_alias(workspace_root)
+
+    token_path = get_token_path(workspace_root)
+    if not os.path.exists(token_path):
+        print("Run /claw-diplomat generate-address first.")
+        return
+    with open(token_path, "r", encoding="ascii") as f:
+        my_token_b64 = f.read().strip()
+    try:
+        my_token = decode_diplomat_token(my_token_b64)
+        my_relay_token = my_token["relay_token"]
+    except ValueError:
+        print("Your address is expired. Run /claw-diplomat generate-address first.")
+        return
+
+    session_id = str(uuid.uuid4())
+    print(f"Connecting to {peer_alias} to send handoff...")
+
+    ws = None
+    try:
+        ws, noise_conn = await connect_to_relay_as_initiator(
+            peer.relay, my_relay_token, peer.relay_token,
+            private_key_bytes, peer.pubkey, session_id,
+        )
+    except SecurityError as e:
+        print(str(e))
+        return
+    except RuntimeError as e:
+        print(f"⚠️  Could not connect to {peer_alias}: {e}")
+        return
+
+    handoff_msg = build_message(session_id, MsgType.HANDOFF.value, our_pubkey_hex, {
+        "from_alias":     our_alias,
+        "part_done":      part_done,
+        "part_remaining": part_remaining,
+        "context":        context,
+    })
+    try:
+        await send_noise_message(noise_conn, ws, handoff_msg)
+        print(
+            f"✅ Handoff sent to {peer_alias}.\n\n"
+            f"They'll receive your context and know what to continue."
+        )
+        append_to_daily_log(
+            workspace_root,
+            f"- {_utc_now_iso()} — HANDOFF to {peer_alias}: {part_done[:60]}\n",
+        )
+    except websockets.exceptions.ConnectionClosed as e:
+        print(f"Connection closed before handoff was delivered: {e}")
+    finally:
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+# ─── Compatibility Aliases (public API surface for tests and external callers) ─
+def build_diplomat_address_token(
+    workspace_root: str,
+    alias: str,
+    relay_url: str,
+    relay_token: str,
+    nat_hint: str,
+    ttl_days: int,
+) -> str:
+    """
+    Build a Diplomat Address token, loading the public key from workspace.
+    Convenience wrapper around build_diplomat_token for external callers.
+    """
+    pubkey_hex = load_public_key_hex(workspace_root)
+    return build_diplomat_token(alias, pubkey_hex, relay_url, relay_token, nat_hint, ttl_days)
+
+decode_diplomat_address_token = decode_diplomat_token
+build_negotiate_message       = build_message
+parse_negotiate_message       = validate_incoming_message
+
+
+def LedgerSession(
+    session_id: str,
+    peer_alias: str,
+    peer_pubkey: str = "",
+    state: str = "IDLE",
+    terms_version: int = 1,
+    final_terms: Optional[dict[str, Any]] = None,
+    events: Optional[list] = None,
+    initiated_by: str = "self",
+    memory_hash: Optional[str] = None,
+    peer_memory_hash: Optional[str] = None,
+    seen_nonces: Optional[list] = None,
+    created_at: str = "",
+    committed_at: Optional[str] = None,
+    checkin_at_actual: Optional[str] = None,
+    pending_terms: Optional[dict[str, Any]] = None,
+) -> SessionRecord:
+    """
+    Factory function that creates a SessionRecord with convenient defaults.
+    Used for testing and external callers that don't need all required fields.
+    """
+    return SessionRecord(
+        session_id=session_id,
+        peer_alias=peer_alias,
+        peer_pubkey=peer_pubkey,
+        initiated_by=initiated_by,
+        state=state,
+        terms_version=terms_version,
+        final_terms=final_terms,
+        memory_hash=memory_hash,
+        peer_memory_hash=peer_memory_hash,
+        seen_nonces=seen_nonces if seen_nonces is not None else [],
+        events=events if events is not None else [],
+        created_at=created_at or _utc_now_iso(),
+        committed_at=committed_at,
+        checkin_at_actual=checkin_at_actual,
+        pending_terms=pending_terms,
+    )
+
 # ─── Installation Helper ──────────────────────────────────────────────────────
 def cmd_install(workspace_root: str) -> None:
     """Run the installation/setup steps. Called during first-time setup."""
@@ -2451,6 +2774,9 @@ def main() -> None:
     p_deny = sub.add_parser("deny-connect")
     p_deny.add_argument("request_id", help="Connection request ID (or prefix) to deny")
 
+    p_handoff = sub.add_parser("handoff")
+    p_handoff.add_argument("peer_alias", help="Alias of the peer to hand off to")
+
     args = parser.parse_args()
 
     try:
@@ -2505,6 +2831,8 @@ def main() -> None:
             cmd_deny_connect(workspace_root, args.request_id)
         except (KeyError, RuntimeError) as e:
             sys.exit(f"Error: {e}")
+    elif args.command == "handoff":
+        asyncio.run(cmd_handoff(workspace_root, args.peer_alias))
     else:
         print(
             "I don't recognize that. Here's what I can do:\n\n"
@@ -2513,6 +2841,7 @@ def main() -> None:
             "  /claw-diplomat approve-connect <id>   — Approve an inbound connection request\n"
             "  /claw-diplomat deny-connect <id>      — Deny an inbound connection request\n"
             "  /claw-diplomat propose <peer>         — Start a negotiation\n"
+            "  /claw-diplomat handoff <peer>         — Hand off completed work + context to a peer\n"
             "  /claw-diplomat status                 — See your commitments\n"
             "  /claw-diplomat checkin <id>           — Report on a commitment\n"
             "  /claw-diplomat peers                  — See your connected peers\n"

@@ -28,6 +28,14 @@ export interface LedgerSession {
     trusted?: boolean;
     peer_ip?: string;
   };
+  final_terms?: {
+    type?: string;
+    from_alias?: string;
+    part_done?: string;
+    part_remaining?: string;
+    context?: string;
+    received_at?: string;
+  };
   created_at?: string;
 }
 
@@ -89,6 +97,20 @@ export function parseInboundPending(ledgerContent: string): LedgerSession[] {
   try {
     const ledger = JSON.parse(ledgerContent) as { sessions?: LedgerSession[] };
     return (ledger.sessions ?? []).filter(s => s.state === 'INBOUND_PENDING');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Parse ledger.json and return sessions in HANDOFF_RECEIVED state.
+ * Used by diplomat-heartbeat to surface incoming task handoffs from peers.
+ * Each returned session has final_terms with part_done, part_remaining, context.
+ */
+export function parseHandoffReceived(ledgerContent: string): LedgerSession[] {
+  try {
+    const ledger = JSON.parse(ledgerContent) as { sessions?: LedgerSession[] };
+    return (ledger.sessions ?? []).filter(s => s.state === 'HANDOFF_RECEIVED');
   } catch {
     return [];
   }

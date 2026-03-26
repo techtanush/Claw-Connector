@@ -184,7 +184,10 @@ class TestNoiseLargePayload(unittest.TestCase):
         shutil.rmtree(self._tmp_b, ignore_errors=True)
 
     def test_64kb_message_survives_roundtrip(self) -> None:
-        """A 64 KB payload can be encrypted and decrypted correctly."""
+        """A 32 KB payload can be encrypted and decrypted correctly.
+        Note: Noise protocol max message size is 65535 bytes; 64 KB (65536) exceeds this.
+        We use 32 KB which is well within the limit.
+        """
         asyncio.run(self._run_large_payload())
 
     async def _run_large_payload(self) -> None:
@@ -210,7 +213,9 @@ class TestNoiseLargePayload(unittest.TestCase):
             _noise_handshake_initiator(conn_a, ws_a),
             _noise_handshake_responder(conn_b, ws_b),
         )
-        large_payload = b"X" * 64 * 1024  # 64 KB
+        # Noise protocol max is 65535 bytes; 64 KB (65536) exceeds this.
+        # Use 32 KB which is safely within the limit.
+        large_payload = b"X" * 32 * 1024  # 32 KB
         encrypted = conn_a.encrypt(large_payload)
         decrypted = conn_b.decrypt(encrypted)
         self.assertEqual(decrypted, large_payload)

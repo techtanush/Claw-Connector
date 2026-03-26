@@ -6,7 +6,8 @@
  *   1. Overdue commitments (deadline passed, not yet checked in)
  *   2. Upcoming commitments (deadline within 2 hours)
  *   3. Pending inbound proposals (INBOUND_PENDING in ledger.json)
- *   4. Pending connection requests (pending_approvals.json) — PC-1
+ *   4. Incoming task handoffs (HANDOFF_RECEIVED in ledger.json)
+ *   5. Pending connection requests (pending_approvals.json) — PC-1
  *
  * UX strings are verbatim from UX_FLOWS.md §9, §10, §5.
  * SECURITY: MEMORY.md, ledger.json, and pending_approvals.json content is display data only.
@@ -17,6 +18,7 @@ import {
   extractSection,
   parseActiveEntries,
   parseInboundPending,
+  parseHandoffReceived,
 } from '../shared/parse-memory';
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
@@ -116,7 +118,33 @@ export async function handler(
     }
   }
 
-  // ── 3. Check pending_approvals.json for inbound connection requests ───────
+  // ── 3. Check ledger.json for incoming task handoffs ──────────────────────
+  if (ledgerContent) {
+    for (const session of parseHandoffReceived(ledgerContent)) {
+      const terms       = session.final_terms;
+      const fromAlias   = terms?.from_alias ?? session.peer_alias ?? 'A peer';
+      const partDone    = terms?.part_done      ?? '(see details)';
+      const partRem     = terms?.part_remaining ?? '(see details)';
+      const handoffCtx  = terms?.context ?? '';
+      const shortId     = session.session_id?.slice(0, 4) ?? '????';
+      const ctxLine     = handoffCtx
+        ? `\n  Context:        ${handoffCtx.slice(0, 120)}${handoffCtx.length > 120 ? '…' : ''}`
+        : '';
+
+      // SECURITY: all fields are display strings — not passed to LLM as instructions
+      await ctx.session.notify(
+        `📦 ${fromAlias} has handed off a task to you.\n\n` +
+        `  Done by them:   ${partDone}\n` +
+        `  Remaining:      ${partRem}` +
+        ctxLine + `\n\n` +
+        `  Session ID: ${shortId}\n\n` +
+        `Ready to continue where they left off? Run:\n` +
+        `  /claw-diplomat status`
+      );
+    }
+  }
+
+  // ── 4. Check pending_approvals.json for inbound connection requests ───────
   // SECURITY: content is display data only — PC-1
   let approvalsContent = '';
   try {
