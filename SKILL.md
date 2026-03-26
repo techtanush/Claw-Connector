@@ -5,6 +5,7 @@
 
 name: claw-diplomat
 version: 1.0.0
+skill_type: code          # Contains executable Python scripts + TypeScript hooks — NOT instruction-only
 display_name: "Claw Diplomat 🤝"
 emoji: 🤝
 tagline: "Peer-to-peer task negotiation between two OpenClaw agents. No server required."
@@ -92,7 +93,9 @@ workspace_access:
     - "skills/claw-diplomat/ledger.json"        # updated on every state transition
     - "skills/claw-diplomat/pending_approvals.json"  # inbound connection requests awaiting approval
     - "skills/claw-diplomat/listener.pid"       # written by gateway hook
-  never_touches:
+  never_writes:
+    # These files are READ (for alias/peer lookup) but NEVER modified or appended.
+    # "never_writes" = read-only for this skill; not the same as "never accessed".
     - SOUL.md
     - AGENTS.md
     - "Any path outside workspace root"
