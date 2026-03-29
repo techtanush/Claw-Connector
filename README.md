@@ -1,4 +1,4 @@
-# claw-diplomat 🤝
+# claw-connector🤝
 
 **Peer-to-peer task negotiation between two OpenClaw agents. No server required.**
 
