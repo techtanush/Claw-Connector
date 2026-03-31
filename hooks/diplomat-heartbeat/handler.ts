@@ -3,8 +3,9 @@
  *
  * Event: command:new (fires on every human message)
  * Checks for:
+ *   0. Pending cron alerts (cron_alerts.json) — Path A proactive, surfaces first
  *   1. Overdue commitments (deadline passed, not yet checked in)
- *   2. Upcoming commitments (deadline within 2 hours)
+ *   2. Upcoming commitments (deadline within 2 hours) — Path B fallback
  *   3. Pending inbound proposals (INBOUND_PENDING in ledger.json)
  *   4. Incoming task handoffs (HANDOFF_RECEIVED in ledger.json)
  *   5. Pending connection requests (pending_approvals.json) — PC-1
@@ -29,7 +30,38 @@ export async function handler(
 ): Promise<void> {
   const now = new Date();
 
+  // ── 0. Surface pending cron alerts (Path A proactive deadline alerts) ─────
+  // cron_deadline_check.py writes here; we surface and mark shown so they
+  // don't repeat. This delivers the alert through the agent's active channel
+  // the moment the human next sends any message — even "hey" on WhatsApp.
+  let cronAlertsRaw = '';
+  try {
+    cronAlertsRaw = await ctx.workspace.read('skills/claw-bond/cron_alerts.json');
+  } catch {
+    // File doesn't exist yet — cron hasn't fired or Path A not installed
+  }
+  if (cronAlertsRaw) {
+    let cronData: { alerts?: Array<{ message: string; id: string; shown?: boolean }> } = {};
+    try { cronData = JSON.parse(cronAlertsRaw); } catch { /* ignore malformed */ }
+    let anyNew = false;
+    for (const alert of cronData.alerts ?? []) {
+      if (!alert.shown) {
+        await ctx.session.notify(alert.message);
+        alert.shown = true;
+        anyNew = true;
+      }
+    }
+    if (anyNew) {
+      // Persist shown=true so alerts don't re-surface on next message
+      await ctx.workspace.write(
+        'skills/claw-bond/cron_alerts.json',
+        JSON.stringify(cronData, null, 2)
+      );
+    }
+  }
+
   // ── 1. Check MEMORY.md for overdue / upcoming commitments ────────────────
+  // Path B fallback: covers users who can't run cron, and catches any gaps.
   let memory = '';
   try {
     memory = await ctx.workspace.read('MEMORY.md');

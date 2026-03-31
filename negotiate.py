@@ -2691,6 +2691,44 @@ def LedgerSession(
     )
 
 # ─── Installation Helper ──────────────────────────────────────────────────────
+def _register_cron(skill_dir: str) -> bool:
+    """
+    Register a crontab entry to run cron_deadline_check.py every 15 minutes.
+    Returns True on success, False if cron is unavailable (Path B fallback active).
+    Non-fatal: a failure here means Path B (heartbeat) still delivers alerts.
+    """
+    try:
+        import subprocess  # noqa: PLC0415 — only import if cron is available
+        check_script = os.path.join(skill_dir, "cron_deadline_check.py")
+        cron_log     = os.path.join(skill_dir, "cron.log")
+        python_bin   = sys.executable or "python3"
+
+        cron_line = (
+            f"*/15 * * * * {python_bin} {check_script} "
+            f">> {cron_log} 2>&1  # claw-bond deadline alerts"
+        )
+
+        # Read existing crontab
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True, text=True, timeout=5
+        )
+        existing = result.stdout if result.returncode == 0 else ""
+
+        # Idempotent: skip if already registered
+        if "claw-bond deadline alerts" in existing:
+            return True
+
+        new_crontab = existing.rstrip("\n") + "\n" + cron_line + "\n"
+        write_result = subprocess.run(
+            ["crontab", "-"],
+            input=new_crontab, capture_output=True, text=True, timeout=5
+        )
+        return write_result.returncode == 0
+    except Exception:
+        return False
+
+
 def cmd_install(workspace_root: str) -> None:
     """Run the installation/setup steps. Called during first-time setup."""
     skill_dir = get_skill_dir(workspace_root)
@@ -2713,6 +2751,18 @@ def cmd_install(workspace_root: str) -> None:
     # Initialize HEARTBEAT.md
     init_heartbeat(workspace_root)
 
+    # Register proactive deadline alerts cron (Path A)
+    # Falls back to Path B (heartbeat) if cron is unavailable — non-fatal.
+    cron_ok = _register_cron(skill_dir)
+    if cron_ok:
+        print("Proactive deadline alerts: cron registered ✓ (runs every 15 min)")
+    else:
+        print(
+            "⚠️  Couldn't register cron for proactive deadline alerts. "
+            "Alerts will still appear when you open your agent (heartbeat fallback). "
+            "To register manually: crontab -e"
+        )
+
     # Port check (non-fatal)
     hole_punch_port = get_diplomat_port() + 1
     try:
@@ -2726,7 +2776,7 @@ def cmd_install(workspace_root: str) -> None:
         )
 
     print(
-        "👋 Setting up claw-diplomat for the first time...\n\n"
+        "👋 Setting up Claw Connector for the first time...\n\n"
         "Generating your secure identity key... ✓\n"
         "Your agent is now ready to negotiate tasks with other OpenClaw agents.\n\n"
         "Next step: share your Diplomat Address with anyone you want to work with.\n\n"
@@ -2742,6 +2792,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("install")
+    sub.add_parser("setup-cron")
     sub.add_parser("key")
     sub.add_parser("list")
     sub.add_parser("peers")
@@ -2787,6 +2838,13 @@ def main() -> None:
     # Sync commands (no I/O loop needed)
     if args.command == "install":
         cmd_install(workspace_root)
+    elif args.command == "setup-cron":
+        skill_dir = get_skill_dir(workspace_root)
+        ok = _register_cron(skill_dir)
+        if ok:
+            print("Cron registered ✓ — deadline alerts will fire 15 min before the 2-hour window.")
+        else:
+            print("Could not register cron. Path B (heartbeat fallback) is active.")
     elif args.command == "key":
         cmd_key(workspace_root)
     elif args.command == "list":
@@ -2845,6 +2903,7 @@ def main() -> None:
             "  /claw-diplomat status                 — See your commitments\n"
             "  /claw-diplomat checkin <id>           — Report on a commitment\n"
             "  /claw-diplomat peers                  — See your connected peers\n"
+            "  /claw-diplomat setup-cron             — Register proactive deadline alerts (Path A)\n"
             "  /claw-diplomat help security          — Security information"
         )
 
