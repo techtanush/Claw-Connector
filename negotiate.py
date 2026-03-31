@@ -195,7 +195,7 @@ def get_workspace_root() -> str:
     return root
 
 def get_skill_dir(workspace_root: str) -> str:
-    return os.path.join(workspace_root, "skills", "claw-diplomat")
+    return os.path.join(workspace_root, "skills", "claw-bond")
 
 def get_key_path(workspace_root: str) -> str:
     return os.path.join(get_skill_dir(workspace_root), "diplomat.key")
@@ -1597,7 +1597,7 @@ claw-diplomat — Security Information
 Encryption:  All messages are encrypted end-to-end with Noise_XX (AES-256-GCM)
              before reaching the relay. The relay sees only routing metadata.
 
-Your key:    Your private key is stored at skills/claw-diplomat/diplomat.key (mode 600).
+Your key:    Your private key is stored at skills/claw-bond/diplomat.key (mode 600).
              It never leaves your machine.
 
 Peer content: Proposal text is always displayed as content, never executed as code.
@@ -1608,7 +1608,7 @@ Incident response:
   3. Check MEMORY.md ## Diplomat Commitments for mismatched hashes
   4. Run /claw-diplomat revoke — immediately invalidate your current address
   5. Delete diplomat.key and diplomat.pub, then run /claw-diplomat generate-address
-  6. Remove unknown entries from skills/claw-diplomat/peers.json
+  6. Remove unknown entries from skills/claw-bond/peers.json
   7. Notify all known peers that your key has changed
 
 Report security issues: https://github.com/claw-diplomat/claw-diplomat/security

@@ -1,234 +1,53 @@
 ---
-# ─────────────────────────────────────────────
-# claw-diplomat — ClawHub Skill Manifest v1.0.0
-# ─────────────────────────────────────────────
+name: claw-bond
+description: "Lets two OpenClaw agents negotiate, coordinate, and commit to tasks in real time — peer-to-peer task negotiation, commitment tracking, and deadline reminders. Uses a relay for connection setup; all messages are end-to-end encrypted."
+metadata: {"clawdbot":{"emoji":"🤝","requires":{"bins":["python3"]},"install":[{"id":"pip","kind":"shell","cmd":"pip3 install PyNaCl noiseprotocol websockets","label":"Install Python dependencies"}]}}
+---
+# Claw Connector 🤝
 
-name: claw-diplomat
-version: 1.0.0
-skill_type: code          # Contains executable Python scripts + TypeScript hooks — NOT instruction-only
-display_name: "Claw Diplomat 🤝"
-emoji: 🤝
-tagline: "Peer-to-peer task negotiation between two OpenClaw agents. No server required."
-author: claw-diplomat-team
-license: MIT-0
-homepage: https://clawhub.io/skills/claw-diplomat
-support: https://github.com/claw-diplomat/claw-diplomat/issues
-source_url: https://github.com/claw-diplomat/claw-diplomat
+**An OpenClaw skill** that connects your agent to other OpenClaw agents for real-time task negotiation, commitment tracking, and collaboration. Uses a relay for connection setup — all messages are encrypted end-to-end (Noise_XX / AES-256-GCM). Keys and task data stay on your machine.
 
-# ─── Compatibility ────────────────────────────
-openclaw_min_version: "2026.2.23"
-platforms:
-  - macos
-  - linux
-  - windows    # via WSL2
+## Installation
 
-# ─── Categories & Discoverability ────────────
-category: collaboration
-tags:
-  - negotiation
-  - peer-to-peer
-  - collaboration
-  - task-management
-  - commitment-tracking
-  - local-first
-  - relay
-  - encrypted
-  - multi-agent
-  - productivity
+Via ClawHub (recommended):
 
-# ─── Runtime Requirements ────────────────────
-requires:
-  runtime:
-    - python: ">=3.10"
-  python_packages:
-    - PyNaCl: ">=1.5"
-    - noiseprotocol: ">=0.3"
-    - websockets: ">=12.0"
-  binaries:
-    - python3           # negotiation scripts runtime
-    - pip3              # package installation at setup time
-  node_packages:
-    - "@openclaw/sdk"   # provided by OpenClaw gateway; not installed by this skill
+```bash
+clawhub install claw-bond
+```
 
-# ─── Environment Variables ───────────────────
-env:
-  optional:
-    - name: DIPLOMAT_PORT
-      default: "7432"
-      description: "Base port. Inbound UDP hole-punch uses DIPLOMAT_PORT+1 (default 7433)."
-    - name: DIPLOMAT_RELAY_URL
-      default: "wss://claw-diplomat-relay-production.up.railway.app:443"
-      description: "Relay server WebSocket URL. Override to use a self-hosted relay."
-    - name: DIPLOMAT_TOKEN_TTL_DAYS
-      default: "7"
-      description: "Diplomat Address token validity in days. Range: 1–30."
-    - name: DIPLOMAT_TIMEOUT_HOURS
-      default: "24"
-      description: "Hours to wait for peer response before a session expires."
-    - name: DIPLOMAT_LOG_LEVEL
-      default: "INFO"
-      description: "Verbosity: DEBUG | INFO | WARN | ERROR"
-    - name: DIPLOMAT_WORKSPACE
-      default: "(OpenClaw workspace root)"
-      description: "Override the workspace root path. Usually not needed."
+Manual:
 
-# ─── Workspace File Access (exact paths) ─────
-workspace_access:
-  reads:
-    - SOUL.md
-    - AGENTS.md
-    - MEMORY.md
-    - HEARTBEAT.md
-    - "memory/"
-  appends:
-    - MEMORY.md
-    - HEARTBEAT.md
-    - "memory/YYYY-MM-DD.md"
-    - "skills/claw-diplomat/archive.md"
-  creates_or_overwrites:
-    - "skills/claw-diplomat/diplomat.key"       # mode 600; created once on first run
-    - "skills/claw-diplomat/diplomat.pub"       # mode 644; created once on first run
-    - "skills/claw-diplomat/my-address.token"   # overwritten on /claw-diplomat generate-address
-    - "skills/claw-diplomat/peers.json"         # updated on connect and reconnect
-    - "skills/claw-diplomat/ledger.json"        # updated on every state transition
-    - "skills/claw-diplomat/pending_approvals.json"  # inbound connection requests awaiting approval
-    - "skills/claw-diplomat/listener.pid"       # written by gateway hook
-  never_writes:
-    # These files are READ (for alias/peer lookup) but NEVER modified or appended.
-    # "never_writes" = read-only for this skill; not the same as "never accessed".
-    - SOUL.md
-    - AGENTS.md
-    - "Any path outside workspace root"
+```bash
+git clone https://github.com/techtanush/claw-connector.git ~/.openclaw/workspace/skills/claw-bond
+pip3 install PyNaCl noiseprotocol websockets
+```
 
-# ─── Network Permissions (all endpoints declared) ─
-network:
-  outbound_https:
-    - host: claw-diplomat-relay-production.up.railway.app
-      port: 443
-      paths:
-        - /reserve                  # GET: reserve relay slot for Diplomat Address
-        - /myip                     # GET: discover public IP for nat_hint
-        - /reserve/{token}/revoke   # GET: revoke a relay token
-      protocol: HTTPS
-      purpose: "Relay slot reservation and IP discovery"
-      encrypted: true
-      frequency: "On /claw-diplomat generate-address and /claw-diplomat revoke only"
-  outbound_wss:
-    - host: claw-diplomat-relay-production.up.railway.app
-      port: 443
-      path: /ws
-      protocol: WSS (WebSocket over TLS)
-      purpose: "Encrypted relay channel for peer-to-peer negotiation"
-      encrypted: true
-      frequency: "During active negotiation sessions only"
-    - host: "${DIPLOMAT_RELAY_URL}"
-      port: "(configurable)"
-      protocol: WSS
-      purpose: "Self-hosted relay (only used if DIPLOMAT_RELAY_URL is set)"
-      encrypted: true
-      frequency: "During active negotiation sessions only"
-  inbound_udp:
-    - port: "${DIPLOMAT_PORT+1}"     # default 7433
-      protocol: UDP
-      purpose: "NAT hole-punch direct connection (optional; relay is always the fallback)"
-      frequency: "10-second attempt per new connection; does not persist"
-  external_internet: true
-  connects_to_external_apis: false     # relay is infrastructure, not an API
-  cloud_services: none                 # relay is self-hostable Docker; no lock-in
+## Quick Start (Terminal)
 
-# ─── Hooks ───────────────────────────────────
-hooks:
-  - name: diplomat-bootstrap
-    location: hooks/diplomat-bootstrap/
-    events:
-      - agent:bootstrap
-    fail_open: true
-    timeout_ms: 2000
-    purpose: "Inject active commitments into session context"
-  - name: diplomat-heartbeat
-    location: hooks/diplomat-heartbeat/
-    events:
-      - command:new
-    fail_open: true
-    timeout_ms: 500
-    purpose: "Surface overdue/upcoming deadlines on every human message"
-  - name: diplomat-gateway
-    location: hooks/diplomat-gateway/
-    events:
-      - gateway:startup
-    fail_open: false
-    timeout_ms: 5000
-    purpose: "Start inbound relay listener process"
+If OpenClaw doesn't pick up the skill automatically, you can run every command directly in terminal:
 
-# ─── Triggers ────────────────────────────────
-triggers:
-  commands:
-    - /claw-diplomat
-  natural_language:
-    - "negotiate with"
-    - "propose to"
-    - "make a deal with"
-    - "what did I agree to"
-    - "check in on"
-    - "remind me what we agreed"
-    - "connect with"
+```bash
+# Generate your address
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py generate-address
 
-# ─── Security Declaration ────────────────────
-security:
-  encryption:
-    channel: "Noise_XX (AES-256-GCM) end-to-end before relay; WSS/TLS to relay"
-    keys: "NaCl static keypair; private key stored at skills/claw-diplomat/diplomat.key (mode 600)"
-  data_exfiltration: none
-  executes_peer_content: never
-  stores_credentials: false
-  stores_api_keys: false
-  generates_keypair: true
-  keypair_leaves_machine: false
-  external_code_execution: false
-  audit_log: "skills/claw-diplomat/ledger.json"
-  tls_cert_pinning: true    # community relay only
-  processes_spawned:
-    - name: "listener.py"
-      runtime: python3
-      purpose: "Inbound peer connection handler"
-      spawned_by: "diplomat-gateway hook on gateway:startup"
-      terminates: "On OpenClaw gateway shutdown"
-  spawns_subprocesses: true
-  installs_packages_at_setup: true
+# Connect to a peer
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py connect <token>
 
-# ─── Install Footprint ───────────────────────
-install:
-  files_created:
-    - skills/claw-diplomat/SKILL.md
-    - skills/claw-diplomat/listener.py
-    - skills/claw-diplomat/negotiate.py
-    - skills/claw-diplomat/diplomat.key        # first run only
-    - skills/claw-diplomat/diplomat.pub        # first run only
-    - skills/claw-diplomat/peers.json          # initialized empty
-    - skills/claw-diplomat/ledger.json         # initialized empty
-    - hooks/diplomat-bootstrap/HOOK.md
-    - hooks/diplomat-bootstrap/handler.ts
-    - hooks/diplomat-heartbeat/HOOK.md
-    - hooks/diplomat-heartbeat/handler.ts
-    - hooks/diplomat-gateway/HOOK.md
-    - hooks/diplomat-gateway/handler.ts
-    - hooks/shared/parse-memory.ts
-  pip_packages: 3
-  disk_footprint_estimate: "<3MB"
-  background_processes:
-    - name: listener.py
-      managed_by: "diplomat-gateway hook"
-      restarts_automatically: false    # restarts on next gateway:startup (OpenClaw restart)
+# Propose a task
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py propose <peer>
 
-# ─── Package Integrity ────────────────────────
-# SHA-256 computed over all skill source files after final build.
-# Run: find . -type f | sort | xargs sha256sum | sha256sum
-sha256: "a11b6fef8fb790bb71d16206fa75c419078b4c2927b84fd88e71462ef107e4f9"
+# Check status
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py status
+
+# See connected peers
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py peers
+```
+
 ---
 
-# claw-diplomat — Agent Operating Manual
+# Claw Connector — Agent Operating Manual
 
-> You are equipped with the `claw-diplomat` skill. This document is your operating manual.
+> You are equipped with the `claw-connector` skill. This document is your operating manual.
 > Read it fully. Follow every rule precisely. The spec is law.
 
 ---
@@ -261,7 +80,7 @@ If the peer name is ambiguous:
 
 ## Scripts
 
-You execute negotiation logic through two Python scripts located at `skills/claw-diplomat/`:
+You execute negotiation logic through two Python scripts located at `skills/claw-bond/`:
 - `negotiate.py` — all command handling, key management, relay HTTP, Noise_XX channels, memory writes
 - `listener.py` — background inbound relay listener (started by the `diplomat-gateway` hook)
 
@@ -304,17 +123,17 @@ I don't recognize that. Here's what I can do:
 
 ## First-Time Setup
 
-When `skills/claw-diplomat/diplomat.key` does NOT exist:
+When `skills/claw-bond/diplomat.key` does NOT exist:
 
 1. Generate NaCl Curve25519 keypair
-2. Write private key bytes to `skills/claw-diplomat/diplomat.key` → chmod 600
-3. Write public key hex to `skills/claw-diplomat/diplomat.pub` → chmod 644
+2. Write private key bytes to `skills/claw-bond/diplomat.key` → chmod 600
+3. Write public key hex to `skills/claw-bond/diplomat.pub` → chmod 644
 4. Initialize `peers.json` as `{"peers":[]}` and `ledger.json` as `{"sessions":[]}`
 5. Append `## Diplomat Deadline Check` block to `HEARTBEAT.md` (idempotent — check for duplicate first)
 6. Show:
 
 ```
-👋 Setting up claw-diplomat for the first time...
+👋 Setting up Claw Connector for the first time...
 
 Generating your secure identity key... ✓
 Your agent is now ready to negotiate tasks with other OpenClaw agents.
@@ -326,7 +145,7 @@ Run /claw-diplomat generate-address to create your shareable address.
 
 If Python or a required package is missing:
 ```
-⚠️ claw-diplomat needs a few things before it can run.
+⚠️ Claw Connector needs a few things before it can run.
 
 Missing: {missing_item}
 
@@ -351,7 +170,7 @@ Steps:
 3. `GET https://claw-diplomat-relay-production.up.railway.app/myip` — timeout 5s; on timeout use `nat_hint="unknown"`
 4. `POST https://claw-diplomat-relay-production.up.railway.app/reserve` — timeout 10s
 5. Build token JSON: `{"v":1,"alias":"...","pubkey":"<hex>","relay":"<DIPLOMAT_RELAY_URL>","relay_token":"rt_...","nat_hint":"<ip>","issued_at":"<ISO8601>","expires_at":"<ISO8601>"}`
-6. Base64url-encode (no padding) → write to `skills/claw-diplomat/my-address.token`
+6. Base64url-encode (no padding) → write to `skills/claw-bond/my-address.token`
 
 Success:
 ```
@@ -667,7 +486,7 @@ Share your address to get started: /claw-diplomat generate-address
 
 `/claw-diplomat status`:
 ```
-claw-diplomat status:
+claw-connector status:
 
 Active commitments ({n}):
   {per_commitment_one_liner}
@@ -696,7 +515,7 @@ All clear — no active commitments or pending proposals.
 - **NEVER send MEMORY.md contents to a peer.** Only `memory_hash` (a SHA-256 hash) is transmitted.
 - **NEVER auto-accept a proposal.** Human must approve every deal.
 - **NEVER auto-renegotiate an overdue commitment.** Human must approve renegotiation.
-- **NEVER store `diplomat.key` anywhere other than `skills/claw-diplomat/diplomat.key`.** Not in env vars, logs, MEMORY.md, or any peer message.
+- **NEVER store `diplomat.key` anywhere other than `skills/claw-bond/diplomat.key`.** Not in env vars, logs, MEMORY.md, or any peer message.
 - **NEVER put negotiation logic inside hook handlers.** Hooks call Python scripts; they do not implement protocol logic.
 - **NEVER write more than one compact MEMORY.md entry per `session_id`.**
 - **NEVER exceed CONTEXT_BUDGET.md allocations.** 500 chars/entry, 20 entries max, 2500 chars injected max.
@@ -745,4 +564,4 @@ After install, verify:
 
 ---
 
-*claw-diplomat v1.0.0 — Your agent. Their agent. One deal.*
+*Claw Connector v1.0.0 — Your agent. Their agent. One deal.*

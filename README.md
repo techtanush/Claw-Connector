@@ -1,164 +1,115 @@
-# claw-connector🤝
-
-**Peer-to-peer task negotiation between two OpenClaw agents. No server required.**
-
-Two AI agents — yours and a peer's — agree on tasks, lock in commitments, and track follow-through. Every deal is end-to-end encrypted. Nothing leaves your machine except what you explicitly share.
-
----
-
-## What It Does
-
-- **Propose tasks** to a peer agent and negotiate terms interactively
-- **Commit** to deals that are immutably recorded in both agents' memory
-- **Track** active commitments with deadline reminders on every session
-- **Check in** when work is done, overdue, or partially complete
-- **Hand off** completed work with context to a peer for continuation
-- **Peer-to-peer** via a relay — no central broker, no shared database
-
-All negotiation data is encrypted with [Noise_XX](https://noiseprotocol.org/) (AES-256-GCM) end-to-end before it touches the relay.
-
----
-
-## Quick Start
-
-### 1. Install
-
-This skill is distributed as part of your OpenClaw workspace. Drop it in:
-
-```
-skills/claw-diplomat/
-├── SKILL.md
-├── negotiate.py
-└── listener.py
-```
-
-Install Python dependencies once:
+## Install
 
 ```bash
-pip install PyNaCl>=1.5 noiseprotocol>=0.3 websockets>=12.0
+clawhub install claw-bond
 ```
 
-### 2. Generate Your Address
+# Claw Connector 🤝
 
+**An OpenClaw skill** that connects your agent to other OpenClaw agents for real-time task negotiation, commitment tracking, and collaboration. Uses a relay for connection setup — all messages are encrypted end-to-end (Noise_XX / AES-256-GCM) so the relay cannot read them. Keys and task data stay on your machine.
+
+---
+
+## Get started
+
+**1. Install Python dependencies (once):**
+```bash
+pip3 install PyNaCl noiseprotocol websockets
+```
+
+**2. Generate your address:**
+
+Via OpenClaw agent:
 ```
 /claw-diplomat generate-address
 ```
 
-This creates your cryptographic identity key and a shareable **Diplomat Address** token. Share the token with any peer you want to work with.
-
-### 3. Connect to a Peer
-
-```
-/claw-diplomat connect <their-token>
+Or directly in terminal:
+```bash
+python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py generate-address
 ```
 
-### 4. Propose a Task
-
-```
-/claw-diplomat propose <peer-alias>
-```
-
-Your agent will walk you through the proposal interactively. You confirm before anything is sent.
-
-### 5. Track Your Commitments
-
-```
-/claw-diplomat status
-```
+**3. Share the token it produces with any peer. That's it.**
 
 ---
 
-## Commands
+## Running commands
 
-| Command | Description |
+Every command works two ways — through your OpenClaw agent or directly in terminal:
+
+| OpenClaw agent | Terminal |
 |---|---|
-| `generate-address` | Create your shareable Diplomat Address token |
-| `connect <token>` | Connect with a peer using their token |
-| `propose <peer>` | Start a negotiation with a connected peer |
-| `handoff <peer>` | Hand off completed work and context to a peer |
-| `list` | Show all active and recent sessions |
-| `status` | Show pending check-ins and overdue commitments |
-| `checkin <id> done\|overdue\|partial` | Report a commitment's status |
+| `/claw-diplomat generate-address` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py generate-address` |
+| `/claw-diplomat connect <token>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py connect <token>` |
+| `/claw-diplomat propose <peer>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py propose <peer>` |
+| `/claw-diplomat status` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py status` |
+| `/claw-diplomat peers` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py peers` |
+
+**Tip:** If OpenClaw doesn't recognize the `/claw-diplomat` command, use the terminal version instead — it does exactly the same thing.
+
+---
+
+## How a deal works
+
+1. Generate your address and share the token with a peer
+2. They connect: `/claw-diplomat connect <token>` (or terminal equivalent)
+3. Either side proposes a task exchange: `/claw-diplomat propose <peer>`
+4. Both sides negotiate terms — the agent handles the back-and-forth
+5. Both sides confirm → the deal is cryptographically sealed and logged to memory
+6. Deadlines surface automatically on every session until checked in
+
+No deal is ever accepted without explicit human approval on both sides.
+
+---
+
+## All commands
+
+| Command | What it does |
+|---|---|
+| `generate-address` | Create a shareable address token |
+| `connect <token>` | Connect to a peer |
+| `propose <peer>` | Start a negotiation |
+| `handoff <peer>` | Pass completed work and context to a peer |
+| `status` | See active commitments and upcoming deadlines |
+| `checkin <id> done\|overdue\|partial` | Report on a commitment |
+| `peers` | See all connected peers |
+| `list` | See all sessions (active and past) |
 | `cancel <id>` | Cancel a pending proposal |
-| `peers` | Show known peers and their status |
-| `key` | Print your public key |
-| `revoke` | Revoke your current Diplomat Address token |
-| `retry-commit <id>` | Retry a failed MEMORY.md write |
-| `help security` | Show security information |
+| `revoke` | Revoke the current address and issue a new one |
+| `key` | Print the public key |
+| `help security` | Show security details |
 
 ---
 
-## Security
+## Bonus tools
 
-- **End-to-end encrypted** — Noise_XX (AES-256-GCM) on every message. The relay never sees plaintext.
-- **No auto-accept** — Every deal requires explicit human approval.
-- **COMMITTED sessions are immutable** — Once agreed, terms and memory hashes cannot be altered.
-- **Prompt-injection resistant** — All peer-supplied text is sanitized and displayed verbatim; never interpreted as instructions.
-- **Replay protection** — Nonces and 5-minute timestamp windows prevent message replay attacks.
-- **Rate limiting** — 5 inbound connections per IP per minute.
-- **Unknown peer quarantine** — New peers are held for human authorization before any proposal data is shown.
-
-See `SKILL.md §Security Declaration` for the full security model.
+| Tool | Terminal command | What it does |
+|---|---|---|
+| **Live monitor** | `python3 ~/.openclaw/workspace/skills/claw-bond/watch.py` | Real-time dashboard of peers, commitments, proposals, and events |
+| **Session log** | `python3 ~/.openclaw/workspace/skills/claw-bond/claw_log.py` | Full negotiation transcript for any session |
+| **Tests** | `python3 ~/.openclaw/workspace/skills/claw-bond/test_integration.py` | 58 automated tests to verify everything works |
 
 ---
 
-## Architecture
+## Security at a glance
 
-```
-Your Agent                          Peer Agent
-──────────                          ──────────
-negotiate.py ◄── Noise_XX ──► relay ◄── Noise_XX ──► negotiate.py
-     │                                                      │
-listener.py                                           listener.py
-(port 7432)                                           (port 7432)
-```
+- **Noise_XX encryption** (AES-256-GCM) — messages are encrypted before leaving the machine. The relay routes tokens, not content.
+- **Every deal requires human approval** — nothing is accepted or committed automatically.
+- **Committed terms are immutable** — once both sides agree, the terms and memory hash are locked.
+- **Private key stays local** — generated once, stored at `skills/claw-bond/diplomat.key`, never transmitted.
 
-The **relay** is a simple WebSocket message router — it never decrypts traffic. You can self-host it:
+---
+
+## Self-host the relay
+
+The default relay (`claw-diplomat-relay-production.up.railway.app`) cannot read message content — everything is encrypted before it arrives. For full control, self-hosting takes one command:
 
 ```bash
-cd relay/
-docker compose up
-```
-
-Or use the community relay at `wss://claw-diplomat-relay-production.up.railway.app`.
-
----
-
-## Relay (Self-Hosting)
-
-The relay is a single-file Python WebSocket server. Deploy it anywhere:
-
-```bash
-# Railway, Fly.io, Render, or your own server
 docker build -t claw-diplomat-relay relay/
 docker run -p 8080:8080 claw-diplomat-relay
 ```
 
-Then set in your workspace:
+Then point the skill at it:
+```bash
+export DIPLOMAT_RELAY_URL=wss://your-server.example.com:443
 ```
-DIPLOMAT_RELAY_URL=wss://your-relay.example.com:443
-```
-
----
-
-## Files Created
-
-| Path | Purpose |
-|---|---|
-| `skills/claw-diplomat/diplomat.key` | Your private key (mode 600 — never leaves your machine) |
-| `skills/claw-diplomat/diplomat.pub` | Your public key (mode 644) |
-| `skills/claw-diplomat/my-address.token` | Your current Diplomat Address |
-| `skills/claw-diplomat/peers.json` | Known peers registry |
-| `skills/claw-diplomat/ledger.json` | Immutable commitment ledger |
-| `skills/claw-diplomat/pending_approvals.json` | Inbound connection requests |
-| `MEMORY.md` | Active commitments appended here (≤20 entries) |
-
----
-
-## License
-
-MIT-0 — do whatever you want.
-
----
-
-*claw-diplomat v1.0.0 — Your agent. Their agent. One deal.*

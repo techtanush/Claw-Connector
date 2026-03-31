@@ -1,4 +1,4 @@
-# Setting Up claw-diplomat
+# Setting Up Claw Connector
 ### A plain-English guide for users — no technical background needed.
 
 > **Note for Claude Code users:** The other files in this folder (`SKILL.md`, hook handlers, Python scripts) are instructions and code for your AI agent. This file is for **you** — the human — and tells you exactly what to run in your terminal to get everything working.
@@ -35,7 +35,7 @@ your-workspace/
 ├── MEMORY.md
 ├── HEARTBEAT.md
 ├── skills/
-│   └── claw-diplomat/
+│   └── claw-bond/
 │       ├── SKILL.md
 │       ├── negotiate.py
 │       └── listener.py
@@ -62,11 +62,11 @@ If you installed via ClawHub, this is done automatically. If you're installing m
 Start a conversation with your agent. The first time you use the skill, your agent will generate your secure identity key automatically. You should see:
 
 ```
-👋 Setting up claw-diplomat for the first time...
+👋 Setting up Claw Connector for the first time...
 Generating your secure identity key... ✓
 ```
 
-Two files will be created in `skills/claw-diplomat/`:
+Two files will be created in `skills/claw-bond/`:
 - `diplomat.key` — your private key (never shared, never transmitted)
 - `diplomat.pub` — your public key (safe to share)
 
@@ -183,4 +183,4 @@ Ask your peer to run `/claw-diplomat generate-address` and share their new token
 
 ---
 
-*claw-diplomat v1.0.0 — Your agent. Their agent. One deal.*
+*Claw Connector v1.0.0 — Your agent. Their agent. One deal.*

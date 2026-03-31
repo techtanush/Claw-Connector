@@ -2,17 +2,22 @@
  * claw-diplomat — hooks/diplomat-gateway/handler.ts
  *
  * Event: gateway:startup
- * Spawns skills/claw-diplomat/listener.py as a detached background process.
- * Writes the PID to skills/claw-diplomat/listener.pid.
  *
- * fail_open: false — this hook is critical. If listener.py cannot start,
- * the gateway should surface the error to the user.
+ * Checks whether the inbound relay listener is already running (via PID file).
+ * If it is running  → logs and returns silently.
+ * If it is not running → writes a flag file and injects a one-line startup
+ *   instruction into the agent session so the agent can start listener.py
+ *   as a background process on the next /claw-diplomat command.
  *
- * Security: only spawns the declared listener.py script, no shell interpretation.
+ * The process launch itself is delegated to the agent (via SKILL.md instructions)
+ * rather than being executed here. This keeps the hook layer free of shell
+ * execution and uses only the declared workspace filesystem APIs.
+ *
+ * fail_open: true — if the listener isn't running the user gets a nudge;
+ * this is not a hard failure that should block the gateway.
  */
 
 import type { OpenClawHookEvent, OpenClawHookContext } from '@openclaw/sdk';
-import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -21,67 +26,54 @@ export async function handler(
   ctx: OpenClawHookContext
 ): Promise<void> {
   const workspaceRoot = process.env.DIPLOMAT_WORKSPACE ?? process.cwd();
-  const listenerPath  = path.join(workspaceRoot, 'skills', 'claw-diplomat', 'listener.py');
-  const pidPath       = path.join(workspaceRoot, 'skills', 'claw-diplomat', 'listener.pid');
+  const skillDir      = path.join(workspaceRoot, 'skills', 'claw-bond');
+  const listenerPath  = path.join(skillDir, 'listener.py');
+  const pidPath       = path.join(skillDir, 'listener.pid');
+  const flagPath      = path.join(skillDir, 'listener.start_requested');
 
+  // ── Verify the skill is installed ──────────────────────────────────────
   if (!fs.existsSync(listenerPath)) {
-    throw new Error(
-      `claw-diplomat listener not found at ${listenerPath}. ` +
-      `Was the skill installed correctly? ` +
-      `Run: clawhub install claw-diplomat`
+    ctx.session.notify(
+      '⚠️ claw-bond: listener.py not found — skill may not be installed correctly.\n' +
+      'Run: clawhub install claw-bond'
     );
+    return;
   }
 
-  // Check if listener is already running (stale PID guard)
+  // ── Check if listener is already running via PID file ──────────────────
   if (fs.existsSync(pidPath)) {
-    const existingPid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
+    const rawPid      = fs.readFileSync(pidPath, 'utf-8').trim();
+    const existingPid = parseInt(rawPid, 10);
     if (!isNaN(existingPid)) {
       try {
-        // process.kill with signal 0 checks if process exists without killing it
+        // Signal 0 = existence check only — does NOT kill or interact with the process.
         process.kill(existingPid, 0);
-        ctx.log('INFO', `claw-diplomat listener already running with PID ${existingPid}`);
-        return; // Already running — do not spawn a second instance
+        ctx.log('INFO', `claw-bond listener is running (PID ${existingPid})`);
+        return; // Already running — nothing to do
       } catch {
-        // Process not running — PID file is stale, proceed to spawn
-        ctx.log('DEBUG', `Stale PID file found (${existingPid}) — spawning new listener`);
+        // Process is gone — PID file is stale; clean it up and fall through
+        ctx.log('DEBUG', `claw-bond stale PID ${existingPid} — will request restart`);
+        try { fs.unlinkSync(pidPath); } catch { /* ignore */ }
       }
     }
   }
 
-  // Build a minimal environment — DIPLOMAT_* vars + bare essentials for python3.
-  // Do NOT inherit the full process.env: that would expose any secrets (API keys,
-  // cloud credentials, SSH agent sockets) present in the gateway's environment.
-  // SECURITY: only DIPLOMAT_*, PATH, HOME, PYTHONPATH, VIRTUAL_ENV are forwarded.
-  const minimalEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (
-      k.startsWith('DIPLOMAT_') ||
-      k === 'PATH' ||
-      k === 'HOME' ||
-      k === 'PYTHONPATH' ||
-      k === 'VIRTUAL_ENV' ||
-      k === 'PYTHONHOME'
-    ) {
-      if (v !== undefined) minimalEnv[k] = v;
-    }
-  }
-  // Always ensure workspace is set so listener.py can find its files
-  minimalEnv['DIPLOMAT_WORKSPACE'] = workspaceRoot;
-
-  const child = spawn('python3', [listenerPath], {
-    env:      minimalEnv,
-    detached: true,
-    stdio:    'ignore',
-  });
-  child.unref();
-
-  if (child.pid === undefined) {
-    throw new Error(
-      'claw-diplomat listener failed to start (python3 not found or listener.py has an error). ' +
-      'Ensure Python 3.10+ is installed and run: pip3 install PyNaCl noiseprotocol websockets'
-    );
+  // ── Listener is not running ─────────────────────────────────────────────
+  // Write a flag file so the agent (and any tooling) can detect this state.
+  // The agent reads SKILL.md which instructs it to run listener.py in the
+  // background when it sees this flag or the next /claw-diplomat command.
+  try {
+    fs.writeFileSync(flagPath, new Date().toISOString(), 'utf-8');
+  } catch {
+    // Non-fatal — the inject below still provides the nudge
   }
 
-  fs.writeFileSync(pidPath, String(child.pid), 'utf-8');
-  ctx.log('INFO', `claw-diplomat listener started with PID ${child.pid}`);
+  ctx.session.inject(
+    '[claw-bond] Listener not running — inbound proposals will not be received.\n' +
+    'To start it, run in terminal:\n' +
+    `  python3 "${listenerPath}" &\n` +
+    'Or tell your agent: "start the claw-bond listener"'
+  );
+
+  ctx.log('INFO', 'claw-bond: listener not running — agent notified to start listener.py');
 }

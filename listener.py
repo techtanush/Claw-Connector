@@ -7,7 +7,7 @@ identity, and writes INBOUND_PENDING sessions to ledger.json for the
 diplomat-heartbeat hook to surface to the human on the next agent command.
 
 Spawned by the diplomat-gateway hook on gateway:startup.
-PID written to skills/claw-diplomat/listener.pid.
+PID written to skills/claw-bond/listener.pid.
 
 Security: every incoming field is treated as untrusted. Rate limiting
 (5 connections/min/IP) enforced. Unknown peers quarantined. SECURITY T1, T4.

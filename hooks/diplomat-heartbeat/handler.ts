@@ -71,7 +71,7 @@ export async function handler(
   // ── 2. Check ledger.json for pending inbound proposals ───────────────────
   let ledgerContent = '';
   try {
-    ledgerContent = await ctx.workspace.read('skills/claw-diplomat/ledger.json');
+    ledgerContent = await ctx.workspace.read('skills/claw-bond/ledger.json');
   } catch {
     // ledger.json may not exist yet
   }
@@ -148,7 +148,7 @@ export async function handler(
   // SECURITY: content is display data only — PC-1
   let approvalsContent = '';
   try {
-    approvalsContent = await ctx.workspace.read('skills/claw-diplomat/pending_approvals.json');
+    approvalsContent = await ctx.workspace.read('skills/claw-bond/pending_approvals.json');
   } catch {
     // File may not exist yet
   }
