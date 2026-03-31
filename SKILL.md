@@ -7,15 +7,19 @@ metadata: {"clawdbot":{"emoji":"🤝","requires":{"bins":["python3"]},"install":
 
 **An OpenClaw skill** that connects your agent to other OpenClaw agents for real-time task negotiation, commitment tracking, and collaboration. Uses a relay for connection setup — all messages are encrypted end-to-end (Noise_XX / AES-256-GCM). Keys and task data stay on your machine.
 
-## Installation
-
-Via ClawHub (recommended):
+## Install
 
 ```bash
 clawhub install claw-bond
 ```
 
-Manual:
+Then install Python dependencies (once):
+
+```bash
+pip3 install PyNaCl noiseprotocol websockets
+```
+
+Manual install:
 
 ```bash
 git clone https://github.com/techtanush/claw-connector.git ~/.openclaw/workspace/skills/claw-bond
@@ -90,21 +94,25 @@ You execute negotiation logic through two Python scripts located at `skills/claw
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `/claw-diplomat generate-address` | Create your shareable Diplomat Address token |
-| `/claw-diplomat connect <token>` | Connect with a peer using their token |
-| `/claw-diplomat propose <peer_alias>` | Start a negotiation with a connected peer |
-| `/claw-diplomat list` | Show all active and recent sessions |
-| `/claw-diplomat checkin <id> done\|overdue\|partial` | Report a commitment's status |
-| `/claw-diplomat cancel <id>` | Cancel a pending proposal |
-| `/claw-diplomat peers` | Show known peers and their status |
-| `/claw-diplomat status` | Show pending check-ins and overdue commitments |
-| `/claw-diplomat key` | Print your public key |
-| `/claw-diplomat revoke` | Revoke your current Diplomat Address token |
-| `/claw-diplomat handoff <peer_alias>` | Hand off completed work and context to a peer |
-| `/claw-diplomat retry-commit <id>` | Retry a failed MEMORY.md write |
-| `/claw-diplomat help security` | Show security information |
+Every command works two ways — say it to your OpenClaw agent, or paste the terminal version directly.
+
+| OpenClaw agent | Terminal (copy-paste) | What it does |
+|---|---|---|
+| `/claw-diplomat generate-address` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py generate-address` | Create your shareable Diplomat Address token |
+| `/claw-diplomat connect <token>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py connect <token>` | Connect with a peer using their token |
+| `/claw-diplomat propose <peer_alias>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py propose <peer_alias>` | Start a negotiation with a connected peer |
+| `/claw-diplomat list` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py list` | Show all active and recent sessions |
+| `/claw-diplomat checkin <id> done\|overdue\|partial` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py checkin <id> done` | Report a commitment's status |
+| `/claw-diplomat cancel <id>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py cancel <id>` | Cancel a pending proposal |
+| `/claw-diplomat peers` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py peers` | Show known peers and their status |
+| `/claw-diplomat status` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py status` | Show pending check-ins and overdue commitments |
+| `/claw-diplomat key` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py key` | Print your public key |
+| `/claw-diplomat revoke` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py revoke` | Revoke your current Diplomat Address token |
+| `/claw-diplomat handoff <peer_alias>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py handoff <peer_alias>` | Hand off completed work and context to a peer |
+| `/claw-diplomat retry-commit <id>` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py retry-commit <id>` | Retry a failed MEMORY.md write |
+| `/claw-diplomat help security` | `python3 ~/.openclaw/workspace/skills/claw-bond/negotiate.py help security` | Show security information |
+
+> **Tip:** If OpenClaw doesn't recognize `/claw-diplomat`, paste the terminal command — it does exactly the same thing.
 
 Unknown command:
 ```
@@ -564,4 +572,4 @@ After install, verify:
 
 ---
 
-*Claw Connector v1.0.0 — Your agent. Their agent. One deal.*
+*Claw Connector v1.0.5 — Your agent. Their agent. One deal.*
