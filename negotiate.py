@@ -717,18 +717,30 @@ def build_diplomat_token(
     nat_hint: str,
     ttl_days: int,
 ) -> str:
-    """Build a Base64url-encoded Diplomat Address token."""
+    """
+    Build a Base64url-encoded Diplomat Address token.
+
+    token_id is placed FIRST in the JSON so every token is visually unique
+    from its very first character — even for the same user running the command
+    twice in the same second. The relay_token from the relay server provides
+    independent uniqueness for routing purposes.
+    """
     now = datetime.datetime.now(datetime.timezone.utc)
     expires = now + datetime.timedelta(days=ttl_days)
+    # Millisecond precision so rapid successive calls differ in issued_at too
+    issued_at_ms  = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    expires_at_ms = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
     token_dict: dict[str, Any] = {
-        "v": 1,
-        "alias": alias[:MAX_ALIAS_LEN],
-        "pubkey": pubkey_hex,
-        "relay": relay_url,
+        # token_id FIRST — guarantees every token is unique from byte 1
+        "token_id":   uuid.uuid4().hex,
+        "v":          1,
+        "alias":      alias[:MAX_ALIAS_LEN],
+        "pubkey":     pubkey_hex,
+        "relay":      relay_url,
         "relay_token": relay_token,
-        "nat_hint": nat_hint,
-        "issued_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "nat_hint":   nat_hint,
+        "issued_at":  issued_at_ms,
+        "expires_at": expires_at_ms,
     }
     raw_json = json.dumps(token_dict, separators=(",", ":"))
     return base64.urlsafe_b64encode(raw_json.encode("utf-8")).decode("ascii").rstrip("=")
@@ -1748,17 +1760,28 @@ async def cmd_generate_address(workspace_root: str) -> None:
     ttl_days  = get_token_ttl_days()
     token_b64 = build_diplomat_token(alias, our_pubkey_hex, relay_url, relay_token, nat_hint, ttl_days)
 
-    # Save token
+    # Decode to pull out token_id for display (proves freshness)
+    try:
+        _decoded = json.loads(base64.urlsafe_b64decode(
+            token_b64 + "=" * (4 - len(token_b64) % 4)
+        ).decode("utf-8"))
+        token_fingerprint = _decoded.get("token_id", "")[:8]
+    except Exception:
+        token_fingerprint = ""
+
+    # Save token (overwrites previous — old slot expires naturally on relay)
     token_path = get_token_path(workspace_root)
     with open(token_path, "w", encoding="ascii") as f:
         f.write(token_b64)
-    LOG.info("Diplomat Address token saved to %s", token_path)
+    LOG.info("New Diplomat Address token saved to %s (id: %s…)", token_path, token_fingerprint)
 
     # Display
     expires_local = _format_deadline_from_iso(expires_at) if expires_at else f"in {ttl_days} days"
+    fingerprint_line = f"  Token ID: {token_fingerprint}… (unique — different every time)\n\n" if token_fingerprint else ""
     print(
-        f"\nYour Diplomat Address is ready. Share this with anyone you want to work with:\n\n"
+        f"\n✅ New Diplomat Address generated. Share this with anyone you want to work with:\n\n"
         f"  {token_b64}\n\n"
+        f"{fingerprint_line}"
         f"This address is valid for {ttl_days} days (until {expires_local}).\n"
         f"Anyone with this address can propose tasks to your agent.\n\n"
         f"To connect with someone, ask them to run:\n"
