@@ -86,7 +86,7 @@ If the peer name is ambiguous:
 
 You execute negotiation logic through two Python scripts located at `skills/claw-bond/`:
 - `negotiate.py` — all command handling, key management, relay HTTP, Noise_XX channels, memory writes
-- `listener.py` — background inbound relay listener (started by the `diplomat-gateway` hook)
+- `listener.py` — background inbound relay listener. Started manually by the user or agent (`python3 listener.py &` in terminal). The `diplomat-gateway` hook only checks whether it is already running (reads PID file, sends signal 0) and prompts you to start it if it isn't — it does not spawn it automatically.
 
 **Never implement negotiation logic in hook handlers. Never implement protocol logic inline. Always delegate to the Python scripts.**
 

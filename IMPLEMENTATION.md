@@ -149,9 +149,9 @@ export DIPLOMAT_RELAY_URL=wss://your-server.example.com:443
 | Write new commitment entries to `MEMORY.md` | Modify `SOUL.md` or `AGENTS.md` |
 | Connect to the declared relay server | Connect to any other external server |
 | Generate and store a local keypair | Send your private key anywhere |
-| Spawn a background listener for inbound connections | Execute any content sent by peers |
+| Run a background listener for inbound connections (started manually by you) | Execute any content sent by peers |
 
-**About the background listener:** When OpenClaw starts, the skill launches a small background process (`listener.py`) that waits for inbound peer connections via the relay. It runs with a minimal set of environment variables — only `DIPLOMAT_*` settings and the bare essentials for Python. Your API keys, cloud credentials, and other secrets in your environment are **not** passed to it.
+**About the background listener:** `listener.py` is a background process you start manually (`python3 listener.py &` in terminal, or via your agent on request). It is **not** launched automatically by any hook. The `diplomat-gateway` hook only checks whether it is already running (reads `listener.pid`, sends signal 0 — a non-killing existence check) and injects a one-line prompt if it needs starting. Your API keys, cloud credentials, and other secrets in your environment are **not** passed to it — it only receives the `DIPLOMAT_*` env vars.
 
 **About context injection:** The bootstrap hook reads your active commitments from `MEMORY.md` (up to 2,500 characters) and injects them into your agent's session at startup. This is how your agent knows what you've committed to. Only your own data is injected — nothing from peers.
 
