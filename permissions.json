@@ -73,6 +73,7 @@
       "listener_note": "listener.py is started manually by the user or agent running 'python3 listener.py &' in terminal. No hook or script spawns it automatically. The gateway hook only checks if it is running (PID file read + signal 0) and notifies the agent if it needs starting.",
       "background_daemon": false,
       "cron_jobs": false,
+      "cron_note": "negotiate.py install writes a ready-to-paste crontab line to skills/claw-bond/crontab-entry.txt. No cron entry is registered automatically. The user pastes it manually via crontab -e. cron_deadline_check.py uses pure file I/O only — no subprocess, no shell commands.",
       "modifies_system_files": false
     },
     "env_vars": {

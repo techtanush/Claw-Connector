@@ -2,23 +2,21 @@
 """
 cron_deadline_check.py — Claw Connector proactive deadline alerts (Path A)
 
-Registered by `negotiate.py install` to run every 15 minutes via crontab:
+Add to crontab to run every 15 minutes (see crontab-entry.txt after install):
   */15 * * * * python3 {skill_dir}/cron_deadline_check.py >> {skill_dir}/cron.log 2>&1
 
 What it does:
   1. Reads MEMORY.md for all [ACTIVE] commitments
   2. For any commitment whose deadline is within 2 hours: writes a plain-language
      alert to skills/claw-bond/cron_alerts.json
-  3. Attempts `openclaw notify "<message>"` — if OpenClaw CLI is in PATH, this
-     delivers a real message through the human's active channel (WhatsApp, Telegram,
-     etc.) without them needing to open their agent
-  4. Falls back gracefully if the CLI is unavailable
+  3. The diplomat-heartbeat hook reads cron_alerts.json and surfaces the alert
+     the next time the human sends any message to their OpenClaw agent
 
-Path B fallback: diplomat-heartbeat hook reads cron_alerts.json on every human
-message and surfaces any unshown alerts, even without cron.
+Path B fallback: diplomat-heartbeat hook performs its own deadline scan on every
+human message, so alerts always arrive even without cron.
 
-Security: reads workspace files only, no network calls, no subprocess execution
-except `openclaw notify` (which is the declared delivery channel).
+Security: reads and writes workspace files only. No network calls. No subprocess
+execution. No shell commands. Pure Python file I/O only.
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ import datetime
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import uuid
@@ -131,22 +128,11 @@ def alert_already_written(existing_alerts: list, commitment_id: str) -> bool:
     return False
 
 
-# ─── OpenClaw notify attempt ─────────────────────────────────────────────────
-def try_openclaw_notify(message: str) -> bool:
-    """
-    Attempt to deliver a proactive message through OpenClaw's active messaging
-    channel (WhatsApp, Telegram, etc.) via the `openclaw notify` CLI.
-    Returns True if the notification was delivered, False if unavailable.
-    This is a best-effort call — failure is non-fatal.
-    """
-    try:
-        result = subprocess.run(
-            ["openclaw", "notify", message],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
+# ─── Delivery ────────────────────────────────────────────────────────────────
+# Alerts are delivered by writing to cron_alerts.json.
+# The diplomat-heartbeat hook reads this file on every human message and
+# surfaces unshown alerts immediately through the agent's active channel.
+# No subprocess or shell execution — pure file I/O only.
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -199,22 +185,16 @@ def main() -> None:
                 f"(/claw-diplomat checkin {commitment_id} done|partial|overdue)"
             )
 
-            # Path A primary: attempt to push through OpenClaw's active channel
-            delivered = try_openclaw_notify(message)
-
-            # Always write to cron_alerts.json as well — heartbeat hook picks this up
+            # Write to cron_alerts.json — heartbeat hook surfaces on next human message
             alert_data["alerts"].append({
                 "id":            str(uuid.uuid4())[:8],
                 "commitment_id": commitment_id,
                 "message":       message,
                 "created_at":    now.isoformat(),
                 "shown":         False,  # heartbeat hook marks True after surfacing
-                "delivered_via_cli": delivered,
             })
             new_alerts += 1
-
-            status = "delivered via openclaw notify ✓" if delivered else "queued for heartbeat"
-            print(f"[cron_deadline_check] Alert for {commitment_id} — {status}")
+            print(f"[cron_deadline_check] Alert queued for heartbeat: {commitment_id}")
 
         elif hours_left <= 0:
             print(f"[cron_deadline_check] {entry['id']} is overdue — heartbeat hook will surface.")

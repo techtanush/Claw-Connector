@@ -2714,42 +2714,33 @@ def LedgerSession(
     )
 
 # ─── Installation Helper ──────────────────────────────────────────────────────
-def _register_cron(skill_dir: str) -> bool:
+def _write_cron_instructions(skill_dir: str) -> str:
     """
-    Register a crontab entry to run cron_deadline_check.py every 15 minutes.
-    Returns True on success, False if cron is unavailable (Path B fallback active).
-    Non-fatal: a failure here means Path B (heartbeat) still delivers alerts.
+    Write a ready-to-paste crontab entry to crontab-entry.txt inside the skill
+    directory. Pure file I/O — no subprocess, no shell execution.
+
+    Returns the path to the written file, or "" on failure.
+    The heartbeat hook (Path B) delivers deadline alerts without cron.
+    Adding this cron entry (Path A) makes alerts proactive (fires on schedule).
     """
+    python_bin   = sys.executable or "python3"
+    check_script = os.path.join(skill_dir, "cron_deadline_check.py")
+    cron_log     = os.path.join(skill_dir, "cron.log")
+    out_path     = os.path.join(skill_dir, "crontab-entry.txt")
+
+    cron_line = (
+        f"*/15 * * * * {python_bin} {check_script} "
+        f">> {cron_log} 2>&1  # claw-bond deadline alerts"
+    )
     try:
-        import subprocess  # noqa: PLC0415 — only import if cron is available
-        check_script = os.path.join(skill_dir, "cron_deadline_check.py")
-        cron_log     = os.path.join(skill_dir, "cron.log")
-        python_bin   = sys.executable or "python3"
-
-        cron_line = (
-            f"*/15 * * * * {python_bin} {check_script} "
-            f">> {cron_log} 2>&1  # claw-bond deadline alerts"
-        )
-
-        # Read existing crontab
-        result = subprocess.run(
-            ["crontab", "-l"],
-            capture_output=True, text=True, timeout=5
-        )
-        existing = result.stdout if result.returncode == 0 else ""
-
-        # Idempotent: skip if already registered
-        if "claw-bond deadline alerts" in existing:
-            return True
-
-        new_crontab = existing.rstrip("\n") + "\n" + cron_line + "\n"
-        write_result = subprocess.run(
-            ["crontab", "-"],
-            input=new_crontab, capture_output=True, text=True, timeout=5
-        )
-        return write_result.returncode == 0
-    except Exception:
-        return False
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("# Claw Connector — proactive deadline alerts (Path A)\n")
+            f.write("# Paste the line below into your crontab:\n")
+            f.write("#   crontab -e\n\n")
+            f.write(cron_line + "\n")
+        return out_path
+    except OSError:
+        return ""
 
 
 def cmd_install(workspace_root: str) -> None:
@@ -2774,16 +2765,14 @@ def cmd_install(workspace_root: str) -> None:
     # Initialize HEARTBEAT.md
     init_heartbeat(workspace_root)
 
-    # Register proactive deadline alerts cron (Path A)
-    # Falls back to Path B (heartbeat) if cron is unavailable — non-fatal.
-    cron_ok = _register_cron(skill_dir)
-    if cron_ok:
-        print("Proactive deadline alerts: cron registered ✓ (runs every 15 min)")
-    else:
+    # Write cron instructions file (Path A) — pure file write, no subprocess.
+    cron_file = _write_cron_instructions(skill_dir)
+    if cron_file:
         print(
-            "⚠️  Couldn't register cron for proactive deadline alerts. "
-            "Alerts will still appear when you open your agent (heartbeat fallback). "
-            "To register manually: crontab -e"
+            f"Proactive deadline alerts: crontab entry written to:\n"
+            f"  {cron_file}\n"
+            f"To activate Path A alerts: run `crontab -e` and paste that line.\n"
+            f"Path B (heartbeat fallback) is always active without any cron setup."
         )
 
     # Port check (non-fatal)
@@ -2863,11 +2852,11 @@ def main() -> None:
         cmd_install(workspace_root)
     elif args.command == "setup-cron":
         skill_dir = get_skill_dir(workspace_root)
-        ok = _register_cron(skill_dir)
-        if ok:
-            print("Cron registered ✓ — deadline alerts will fire 15 min before the 2-hour window.")
+        cron_file = _write_cron_instructions(skill_dir)
+        if cron_file:
+            print(f"Crontab entry written to: {cron_file}\nRun `crontab -e` and paste that line to activate Path A alerts.")
         else:
-            print("Could not register cron. Path B (heartbeat fallback) is active.")
+            print("Could not write crontab file. Path B (heartbeat fallback) is active.")
     elif args.command == "key":
         cmd_key(workspace_root)
     elif args.command == "list":
